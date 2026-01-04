@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { User, AppSettings, BalanceRequest, UserRole } from '../types';
-import { supabase } from '../supabaseClient';
+import { supabase, isSupabaseConfigured } from '../supabaseClient';
 
 interface WalletProps {
   user: User;
@@ -36,8 +36,13 @@ const Wallet: React.FC<WalletProps> = ({ user, settings, users, balanceRequests,
       status: 'PENDING',
       created_at: Date.now()
     };
+    
     setBalanceRequests([request, ...balanceRequests]);
-    if (!!process.env.NEXT_PUBLIC_SUPABASE_URL) await supabase.from('balance_requests').insert([request]);
+    
+    if (isSupabaseConfigured) {
+      await supabase.from('balance_requests').insert([request]);
+    }
+    
     setShowPix(true);
   };
 

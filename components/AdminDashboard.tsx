@@ -5,6 +5,7 @@ import { User, UserRole, Match, Ticket, AppSettings, BalanceRequest } from '../t
 interface Props {
   users: User[];
   setUsers: React.Dispatch<React.SetStateAction<User[]>>;
+  onDeleteUser: (id: string) => void;
   matches: Match[];
   setMatches: React.Dispatch<React.SetStateAction<Match[]>>;
   tickets: Ticket[];
@@ -16,7 +17,7 @@ interface Props {
 }
 
 const AdminDashboard: React.FC<Props> = ({ 
-  users, setUsers, matches, setMatches, tickets, setTickets, settings, setSettings, balanceRequests, setBalanceRequests 
+  users, setUsers, onDeleteUser, matches, setMatches, tickets, setTickets, settings, setSettings, balanceRequests, setBalanceRequests 
 }) => {
   const [tab, setTab] = useState<'EQUIPE' | 'JOGOS' | 'CONFIG'>('EQUIPE');
   const [newUser, setNewUser] = useState({ name: '', username: '', password: '', role: UserRole.SUPERVISOR });
@@ -102,12 +103,21 @@ const AdminDashboard: React.FC<Props> = ({
               </form>
             </div>
             <div className="lg:col-span-2 space-y-4">
-               <h3 className="text-[10px] font-black opacity-30 uppercase tracking-widest px-2">Gestão de Saldos da Rede Direta</h3>
+               <h3 className="text-[10px] font-black opacity-30 uppercase tracking-widest px-2">Gestão da Rede Direta</h3>
               {myDirectUsers.map(u => (
-                <div key={u.id} className="match-card p-4 rounded-3xl border border-white/5 flex justify-between items-center">
-                  <div>
-                    <p className="font-impact italic text-white uppercase text-xs">{u.name}</p>
-                    <p className="text-[11px] text-[#a3e635] font-impact italic">Saldo: R$ {u.balance.toFixed(2)}</p>
+                <div key={u.id} className="match-card p-4 rounded-3xl border border-white/5 flex justify-between items-center group relative">
+                  <div className="flex items-center gap-4">
+                    <button 
+                      onClick={() => onDeleteUser(u.id)}
+                      className="w-10 h-10 bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white rounded-xl transition-all flex items-center justify-center border border-red-500/20"
+                      title="Excluir Usuário"
+                    >
+                      <i className="fa-solid fa-trash-can text-xs"></i>
+                    </button>
+                    <div>
+                      <p className="font-impact italic text-white uppercase text-xs">{u.name}</p>
+                      <p className="text-[11px] text-[#a3e635] font-impact italic">Saldo: R$ {u.balance.toFixed(2)}</p>
+                    </div>
                   </div>
                   <div className="flex gap-2">
                      <input 

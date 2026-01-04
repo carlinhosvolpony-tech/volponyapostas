@@ -7,13 +7,14 @@ interface Props {
   setCurrentUser: React.Dispatch<React.SetStateAction<User | null>>;
   users: User[];
   setUsers: React.Dispatch<React.SetStateAction<User[]>>;
+  onDeleteUser: (id: string) => void;
   tickets: Ticket[];
   setTickets?: React.Dispatch<React.SetStateAction<Ticket[]>>;
   balanceRequests: BalanceRequest[];
   setBalanceRequests: React.Dispatch<React.SetStateAction<BalanceRequest[]>>;
 }
 
-const SupervisorDashboard: React.FC<Props> = ({ currentUser, setCurrentUser, users, setUsers, tickets, setTickets, balanceRequests, setBalanceRequests }) => {
+const SupervisorDashboard: React.FC<Props> = ({ currentUser, setCurrentUser, users, setUsers, onDeleteUser, tickets, setTickets, balanceRequests, setBalanceRequests }) => {
   const [tab, setTab] = useState<'EQUIPE' | 'PRESTACAO' | 'CONFIG'>('EQUIPE');
   const [adjustAmounts, setAdjustAmounts] = useState<Record<string, string>>({});
   const [newUser, setNewUser] = useState({ name: '', username: '', password: '', role: UserRole.BOOKIE });
@@ -132,11 +133,19 @@ const SupervisorDashboard: React.FC<Props> = ({ currentUser, setCurrentUser, use
             <div className="lg:col-span-2 space-y-4">
               <h3 className="text-[10px] font-black opacity-30 uppercase tracking-widest px-2">Gestão de Saldo da Equipe Direta</h3>
               {myNetwork.map(u => (
-                <div key={u.id} className="match-card p-5 rounded-3xl border border-white/5 flex justify-between items-center">
-                  <div>
-                    <p className="font-impact italic text-white uppercase text-sm">{u.name}</p>
-                    <p className="text-[10px] text-white/20 uppercase font-black">{u.role}</p>
-                    <p className="text-[#a3e635] font-impact italic text-xs mt-1">Saldo: R$ {u.balance.toFixed(2)}</p>
+                <div key={u.id} className="match-card p-5 rounded-3xl border border-white/5 flex justify-between items-center group">
+                  <div className="flex items-center gap-4">
+                    <button 
+                      onClick={() => onDeleteUser(u.id)}
+                      className="w-10 h-10 bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white rounded-xl transition-all flex items-center justify-center border border-red-500/20"
+                    >
+                      <i className="fa-solid fa-trash-can text-xs"></i>
+                    </button>
+                    <div>
+                      <p className="font-impact italic text-white uppercase text-sm">{u.name}</p>
+                      <p className="text-[10px] text-white/20 uppercase font-black">{u.role}</p>
+                      <p className="text-[#a3e635] font-impact italic text-xs mt-1">Saldo: R$ {u.balance.toFixed(2)}</p>
+                    </div>
                   </div>
                   <div className="flex gap-2">
                     <input type="text" placeholder="R$" value={adjustAmounts[u.id] || ''} onChange={e => setAdjustAmounts({...adjustAmounts, [u.id]: e.target.value})} className="w-16 bg-black/40 border-white/5 border rounded-xl px-2 text-white text-[10px] outline-none" />

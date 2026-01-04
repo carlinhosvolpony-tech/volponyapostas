@@ -24,67 +24,75 @@ const INITIAL_MATCHES: Match[] = Array.from({ length: 12 }, (_, i) => ({
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    const saved = localStorage.getItem(SESSION_KEY);
-    return saved ? JSON.parse(saved) : null;
+    try {
+      const saved = localStorage.getItem(SESSION_KEY);
+      return saved ? JSON.parse(saved) : null;
+    } catch { return null; }
   });
 
   const [users, setUsers] = useState<User[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      return parsed.users || [];
-    }
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return parsed.users || [];
+      }
+    } catch {}
     return [{ id: 'admin-1', name: 'Diretoria Master', username: 'admin', password: '123', role: UserRole.ADMIN, balance: 1000000, commission_rate: 0 }];
   });
 
   const [matches, setMatches] = useState<Match[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      return parsed.matches || INITIAL_MATCHES;
-    }
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return parsed.matches || INITIAL_MATCHES;
+      }
+    } catch {}
     return INITIAL_MATCHES;
   });
 
   const [tickets, setTickets] = useState<Ticket[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      return parsed.tickets || [];
-    }
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return parsed.tickets || [];
+      }
+    } catch {}
     return [];
   });
 
   const [settings, setSettings] = useState<AppSettings>(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      return parsed.settings || { pix_key: 'admin@dgrau.com', is_market_open: true };
-    }
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return parsed.settings || { pix_key: 'admin@dgrau.com', is_market_open: true };
+      }
+    } catch {}
     return { pix_key: 'admin@dgrau.com', is_market_open: true };
   });
 
   const [balanceRequests, setBalanceRequests] = useState<BalanceRequest[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      return parsed.balanceRequests || [];
-    }
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return parsed.balanceRequests || [];
+      }
+    } catch {}
     return [];
   });
 
-  const [notification, setNotification] = useState<{show: boolean, msg: string} | null>(null);
-  const prevReqCount = useRef(balanceRequests.length);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
   const [view, setView] = useState<'BET' | 'HISTORY' | 'WALLET' | 'DASHBOARD'>('BET');
 
-  // --- REALTIME SYNC LOGIC ---
+  // --- SINCRONIZAÇÃO EM TEMPO REAL ---
   useEffect(() => {
     if (!isSupabaseConfigured) return;
 
-    // Sincronização Inicial
     const fetchData = async () => {
-      const { data: m } = await supabase.from('matches').select('*');
+      const { data: m } = await supabase.from('matches').select('*').order('id', { ascending: true });
       if (m) setMatches(m);
       const { data: u } = await supabase.from('users').select('*');
       if (u) setUsers(u);
@@ -95,152 +103,100 @@ const App: React.FC = () => {
     };
     fetchData();
 
-    // Inscrição em Tempo Real para mudanças globais
-    const channel = supabase.channel('schema-db-changes')
+    const channel = supabase.channel('realtime-updates')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, payload => {
-        setMatches(current => {
-          if (payload.eventType === 'INSERT') return [...current, payload.new as Match];
-          if (payload.eventType === 'UPDATE') return current.map(m => m.id === payload.new.id ? payload.new as Match : m);
-          if (payload.eventType === 'DELETE') return current.filter(m => m.id !== payload.old.id);
-          return current;
-        });
+        if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
+          setMatches(current => {
+            const updated = payload.new as Match;
+            return current.map(m => m.id === updated.id ? updated : m);
+          });
+        }
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, payload => {
-        setUsers(current => {
-          if (payload.eventType === 'UPDATE') {
-            const updated = payload.new as User;
-            if (currentUser && updated.id === currentUser.id) {
-              setCurrentUser(updated);
-            }
-            return current.map(u => u.id === updated.id ? updated : u);
-          }
-          if (payload.eventType === 'INSERT') return [...current, payload.new as User];
-          return current;
-        });
+        if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
+          const updated = payload.new as User;
+          setUsers(current => {
+            const exists = current.find(u => u.id === updated.id);
+            if (exists) return current.map(u => u.id === updated.id ? updated : u);
+            return [...current, updated];
+          });
+          if (currentUser && updated.id === currentUser.id) setCurrentUser(updated);
+        } else if (payload.eventType === 'DELETE') {
+          setUsers(current => current.filter(u => u.id !== payload.old.id));
+          if (currentUser && payload.old.id === currentUser.id) handleLogout();
+        }
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tickets' }, payload => {
-        if (payload.eventType === 'INSERT') setTickets(prev => [payload.new as Ticket, ...prev]);
-        if (payload.eventType === 'UPDATE') setTickets(prev => prev.map(t => t.id === payload.new.id ? payload.new as Ticket : t));
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'tickets' }, payload => {
+        setTickets(prev => [payload.new as Ticket, ...prev]);
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'balance_requests' }, payload => {
-        if (payload.eventType === 'INSERT') setBalanceRequests(prev => [payload.new as BalanceRequest, ...prev]);
-        if (payload.eventType === 'UPDATE') setBalanceRequests(prev => prev.map(r => r.id === payload.new.id ? payload.new as BalanceRequest : r));
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'balance_requests' }, payload => {
+        setBalanceRequests(prev => [payload.new as BalanceRequest, ...prev]);
       })
       .subscribe();
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, [currentUser?.id]);
 
-  // Função helper para persistir mudanças tanto local quanto remotamente
-  const updateDB = async (table: string, data: any) => {
-    if (isSupabaseConfigured) {
-      await supabase.from(table).upsert(data);
-    }
+  const handleUpdateMatches = async (updater: any) => {
+    setMatches(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      if (isSupabaseConfigured) supabase.from('matches').upsert(next).then();
+      return next;
+    });
   };
 
-  // Monitorar novas solicitações para notificar o Gerente/Criador
-  useEffect(() => {
-    if (currentUser && balanceRequests.length > prevReqCount.current) {
-      const lastReq = balanceRequests[0];
-      const requester = users.find(u => u.id === lastReq.user_id);
-      const parentId = requester?.parent_id || 'admin-1';
+  const handleUpdateUsers = async (updater: any) => {
+    setUsers(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      if (isSupabaseConfigured) supabase.from('users').upsert(next).then();
+      return next;
+    });
+  };
 
-      if (lastReq.status === 'PENDING' && currentUser.id === parentId) {
-        setNotification({ show: true, msg: `Nova recarga de R$ ${lastReq.amount.toFixed(2)} solicitada por ${lastReq.user_name}` });
-        try {
-          if (!audioRef.current) {
-            audioRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
-          }
-          audioRef.current.play().catch(() => {});
-        } catch (e) {}
-        setTimeout(() => setNotification(null), 5000);
-      }
+  const handleDeleteUser = async (userId: string) => {
+    if (!confirm("⚠️ ATENÇÃO: Deseja realmente excluir este usuário? Esta ação é irreversível e removerá o acesso dele imediatamente.")) return;
+    
+    setUsers(prev => prev.filter(u => u.id !== userId));
+    if (isSupabaseConfigured) {
+      await supabase.from('users').delete().eq('id', userId);
     }
-    prevReqCount.current = balanceRequests.length;
-  }, [balanceRequests, currentUser, users]);
-
-  useEffect(() => {
-    const dataToSave = { users, matches, tickets, settings, balanceRequests };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
-  }, [users, matches, tickets, settings, balanceRequests]);
-
-  useEffect(() => {
-    if (currentUser) {
-      localStorage.setItem(SESSION_KEY, JSON.stringify(currentUser));
-    } else {
-      localStorage.removeItem(SESSION_KEY);
-    }
-  }, [currentUser]);
-
-  if (!currentUser) return <Login onLogin={setCurrentUser} users={users} setUsers={(u) => { setUsers(u); updateDB('users', u); }} />;
+  };
 
   const handleLogout = () => {
     setCurrentUser(null);
+    localStorage.removeItem(SESSION_KEY);
     setView('BET');
   };
 
-  const handleDeleteTicket = async (ticketId: string) => {
-    if (window.confirm("Excluir este bilhete permanentemente?")) {
-      setTickets(prev => prev.filter(t => t.id !== ticketId));
-      if (isSupabaseConfigured) await supabase.from('tickets').delete().eq('id', ticketId);
-    }
-  };
+  useEffect(() => {
+    const data = { users, matches, tickets, settings, balanceRequests };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  }, [users, matches, tickets, settings, balanceRequests]);
+
+  if (!currentUser) return <Login onLogin={setCurrentUser} users={users} setUsers={handleUpdateUsers} />;
 
   const pendingCount = balanceRequests.filter(r => r.status === 'PENDING' && (
     users.find(u => u.id === r.user_id)?.parent_id === currentUser.id
   )).length;
 
-  const renderContent = () => {
-    switch (view) {
-      case 'DASHBOARD':
-        if (currentUser.role === UserRole.ADMIN) return (
-          <AdminDashboard 
-            users={users} 
-            setUsers={(u) => { setUsers(u); updateDB('users', u); }} 
-            matches={matches} 
-            setMatches={(m) => { setMatches(m); updateDB('matches', m); }} 
-            tickets={tickets} 
-            setTickets={setTickets}
-            settings={settings}
-            setSettings={setSettings}
-            balanceRequests={balanceRequests}
-            setBalanceRequests={setBalanceRequests}
-          />
-        );
-        if (currentUser.role === UserRole.SUPERVISOR) return <SupervisorDashboard currentUser={currentUser} setCurrentUser={setCurrentUser} users={users} setUsers={(u) => { setUsers(u); updateDB('users', u); }} tickets={tickets} setTickets={setTickets} balanceRequests={balanceRequests} setBalanceRequests={setBalanceRequests} />;
-        if (currentUser.role === UserRole.BOOKIE) return <BookieDashboard currentUser={currentUser} setCurrentUser={setCurrentUser} users={users} setUsers={(u) => { setUsers(u); updateDB('users', u); }} tickets={tickets} setTickets={setTickets} balanceRequests={balanceRequests} setBalanceRequests={setBalanceRequests} />;
-        return <BettingArea matches={matches} user={currentUser} onBet={async t => { setTickets([t, ...tickets]); if(isSupabaseConfigured) await supabase.from('tickets').insert(t); }} setUser={setCurrentUser} isMarketOpen={settings.is_market_open} />;
-      case 'HISTORY':
-        return <TicketHistory tickets={tickets.filter(t => t.user_id === currentUser.id || currentUser.role === UserRole.ADMIN)} currentUser={currentUser} setView={v => setView(v as any)} onDelete={handleDeleteTicket} />;
-      case 'WALLET':
-        return <Wallet user={currentUser} settings={settings} users={users} balanceRequests={balanceRequests} setBalanceRequests={async r => { setBalanceRequests(r); if(isSupabaseConfigured) await updateDB('balance_requests', r); }} setView={v => setView(v as any)} />;
-      default:
-        return <BettingArea matches={matches} user={currentUser} onBet={async t => { setTickets([t, ...tickets]); if(isSupabaseConfigured) await supabase.from('tickets').insert(t); }} setUser={setCurrentUser} isMarketOpen={settings.is_market_open} />;
-    }
-  };
-
   return (
-    <div className="min-h-screen bg-[#020617] text-white selection:bg-[#a3e635] selection:text-black pt-32 pb-20">
+    <div className="min-h-screen bg-[#020617] text-white pt-32 pb-20">
       <Navbar user={currentUser} view={view} setView={setView} onLogout={handleLogout} isMarketOpen={settings.is_market_open} pendingCount={pendingCount} />
       
-      {notification && (
-        <div className="fixed top-28 right-6 z-[200] animate-in slide-in-from-right-10 duration-500">
-          <div className="bg-[#a3e635] text-black px-8 py-5 rounded-3xl shadow-2xl flex items-center gap-4 border-4 border-black font-impact italic uppercase text-xs">
-            <div className="w-10 h-10 bg-black text-[#a3e635] rounded-full flex items-center justify-center animate-bounce">
-              <i className="fa-solid fa-bell"></i>
-            </div>
-            <span>{notification.msg}</span>
-            <button onClick={() => setNotification(null)} className="ml-4 opacity-40 hover:opacity-100">
-              <i className="fa-solid fa-xmark"></i>
-            </button>
-          </div>
-        </div>
-      )}
-
       <main className="container mx-auto px-4">
-        {renderContent()}
+        {view === 'DASHBOARD' && currentUser.role === UserRole.ADMIN && (
+          <AdminDashboard 
+            users={users} setUsers={handleUpdateUsers} onDeleteUser={handleDeleteUser}
+            matches={matches} setMatches={handleUpdateMatches} 
+            tickets={tickets} settings={settings} setSettings={setSettings}
+            balanceRequests={balanceRequests} setBalanceRequests={setBalanceRequests}
+          />
+        )}
+        {view === 'DASHBOARD' && currentUser.role === UserRole.SUPERVISOR && <SupervisorDashboard currentUser={currentUser} setCurrentUser={setCurrentUser} users={users} setUsers={handleUpdateUsers} onDeleteUser={handleDeleteUser} tickets={tickets} balanceRequests={balanceRequests} setBalanceRequests={setBalanceRequests} />}
+        {view === 'DASHBOARD' && currentUser.role === UserRole.BOOKIE && <BookieDashboard currentUser={currentUser} setCurrentUser={setCurrentUser} users={users} setUsers={handleUpdateUsers} onDeleteUser={handleDeleteUser} tickets={tickets} balanceRequests={balanceRequests} setBalanceRequests={setBalanceRequests} />}
+        {view === 'BET' && <BettingArea matches={matches} user={currentUser} onBet={async t => { setTickets([t, ...tickets]); if(isSupabaseConfigured) await supabase.from('tickets').insert(t); }} setUser={setCurrentUser} isMarketOpen={settings.is_market_open} />}
+        {view === 'HISTORY' && <TicketHistory tickets={tickets.filter(t => t.user_id === currentUser.id || currentUser.role === UserRole.ADMIN)} currentUser={currentUser} setView={setView} />}
+        {view === 'WALLET' && <Wallet user={currentUser} settings={settings} users={users} balanceRequests={balanceRequests} setBalanceRequests={setBalanceRequests} setView={setView} />}
       </main>
     </div>
   );
