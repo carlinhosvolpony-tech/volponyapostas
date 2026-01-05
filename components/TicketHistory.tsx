@@ -73,6 +73,9 @@ const TicketHistory: React.FC<TicketHistoryProps> = ({ tickets, setView, current
         const prize12 = ticket.bet_amount * 100;
         const prize11 = ticket.bet_amount * 50;
         const prize10 = ticket.bet_amount * 25;
+        
+        // O usuário pode excluir se for ADMIN ou se for o dono do bilhete
+        const canDelete = isAdmin || currentUser.id === ticket.user_id;
 
         return (
           <div key={ticket.id} className="relative animate-in slide-in-from-bottom-10 duration-700">
@@ -80,13 +83,15 @@ const TicketHistory: React.FC<TicketHistoryProps> = ({ tickets, setView, current
             <div className="absolute -top-6 right-8 z-30 flex gap-4">
               <button 
                 onClick={() => downloadTicketImage(ticket)}
+                title="Baixar Comprovante"
                 className="w-16 h-16 rounded-3xl bg-[#a3e635] text-black shadow-2xl hover:scale-110 active:scale-95 transition-all flex items-center justify-center border-4 border-[#020617]"
               >
                 <i className="fa-solid fa-download text-xl"></i>
               </button>
-              {isAdmin && onDelete && (
+              {canDelete && onDelete && (
                 <button 
                   onClick={() => onDelete(ticket.id)}
+                  title="Excluir Bilhete"
                   className="w-16 h-16 rounded-3xl bg-red-600 text-white shadow-2xl hover:scale-110 active:scale-95 transition-all flex items-center justify-center border-4 border-[#020617]"
                 >
                   <i className="fa-solid fa-trash text-xl"></i>
@@ -116,7 +121,6 @@ const TicketHistory: React.FC<TicketHistoryProps> = ({ tickets, setView, current
                     <span className="text-xs font-impact italic text-white/10">#{i + 1}</span>
                     <span className="text-[12px] font-black uppercase text-right text-white truncate px-3">{match.home}</span>
                     <div className="flex justify-center gap-1.5">
-                       {/* Corrigido: 'C' para Casa, 'E' para Empate, 'A' para Away (Fora) conforme BettingArea.tsx */}
                        {['C', 'E', 'A'].map(opt => (
                          <div 
                             key={opt} 

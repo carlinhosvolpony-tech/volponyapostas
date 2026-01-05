@@ -117,8 +117,12 @@ const App: React.FC = () => {
               setBalanceRequests(prev => prev.map(r => r.id === updated.id ? updated : r));
             }
           })
-          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'tickets' }, payload => {
-            setTickets(prev => [payload.new as Ticket, ...prev]);
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'tickets' }, payload => {
+            if (payload.eventType === 'DELETE') {
+               setTickets(prev => prev.filter(t => t.id !== payload.old.id));
+            } else if (payload.eventType === 'INSERT') {
+               setTickets(prev => [payload.new as Ticket, ...prev]);
+            }
           })
           .subscribe();
 
@@ -148,16 +152,11 @@ const App: React.FC = () => {
   };
 
   const handleUpdateSingleUser = async (updatedUser: User) => {
-    // 1. Atualiza na lista mestra (users)
     setUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
-    
-    // 2. Se for o usuário logado, atualiza o estado da sessão e o localStorage
     if (currentUser && currentUser.id === updatedUser.id) {
       setCurrentUser(updatedUser);
       localStorage.setItem(SESSION_KEY, JSON.stringify(updatedUser));
     }
-    
-    // 3. Persiste no banco de dados
     if (isSupabaseConfigured) {
       await supabase.from('users').upsert(updatedUser);
     }
@@ -166,6 +165,15 @@ const App: React.FC = () => {
   const handleDeleteUser = async (userId: string) => {
     setUsers(prev => prev.filter(u => u.id !== userId));
     if (isSupabaseConfigured) await supabase.from('users').delete().eq('id', userId);
+  };
+
+  const handleDeleteTicket = async (ticketId: string) => {
+    if (!confirm("Deseja realmente excluir este bilhete permanentemente?")) return;
+    setTickets(prev => prev.filter(t => t.id !== ticketId));
+    if (isSupabaseConfigured) {
+      await supabase.from('tickets').delete().eq('id', ticketId);
+    }
+    alert("Bilhete excluído com sucesso.");
   };
 
   const handleUpdateSettings = async (next: AppSettings) => {
@@ -210,7 +218,6 @@ const App: React.FC = () => {
         {view === 'DASHBOARD' && currentUser.role === UserRole.SUPERVISOR && <SupervisorDashboard currentUser={currentUser} setCurrentUser={setCurrentUser} users={users} setUsers={handleUpdateUsers} onDeleteUser={handleDeleteUser} tickets={tickets} balanceRequests={balanceRequests} setBalanceRequests={setBalanceRequests} />}
         {view === 'DASHBOARD' && currentUser.role === UserRole.BOOKIE && <BookieDashboard currentUser={currentUser} setCurrentUser={setCurrentUser} users={users} setUsers={handleUpdateUsers} onDeleteUser={handleDeleteUser} tickets={tickets} balanceRequests={balanceRequests} setBalanceRequests={setBalanceRequests} />}
         
-        {/* CORREÇÃO AQUI: Passando handleUpdateSingleUser para garantir que a aposta reduza o saldo globalmente */}
         {view === 'BET' && (
           <BettingArea 
             matches={matches} 
@@ -224,7 +231,14 @@ const App: React.FC = () => {
           />
         )}
         
-        {view === 'HISTORY' && <TicketHistory tickets={tickets.filter(t => t.user_id === currentUser.id || currentUser.role === UserRole.ADMIN)} currentUser={currentUser} setView={setView} />}
+        {view === 'HISTORY' && (
+          <TicketHistory 
+            tickets={tickets.filter(t => t.user_id === currentUser.id || currentUser.role === UserRole.ADMIN)} 
+            currentUser={currentUser} 
+            setView={setView} 
+            onDelete={handleDeleteTicket}
+          />
+        )}
         {view === 'WALLET' && <Wallet user={currentUser} settings={settings} users={users} balanceRequests={balanceRequests} setBalanceRequests={setBalanceRequests} setView={setView} onUpdateUser={handleUpdateSingleUser} onDeleteUser={handleDeleteUser} />}
       </main>
     </div>
