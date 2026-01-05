@@ -1,0 +1,23 @@
+
+{
+  "name": "Volpony Apostas | D'GRAU",
+  "short_name": "Volpony",
+  "description": "Arena de Elite para Apostas Esportivas Realtime",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#a3e635",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/5312/5312456.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/5312/5312456.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
