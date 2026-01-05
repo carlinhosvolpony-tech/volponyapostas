@@ -14,14 +14,22 @@ interface Props {
   setSettings: (s: AppSettings) => void;
   balanceRequests: BalanceRequest[];
   setBalanceRequests: React.Dispatch<React.SetStateAction<BalanceRequest[]>>;
+  currentUser: User;
+  onUpdateSingleUser: (u: User) => void;
 }
 
 const AdminDashboard: React.FC<Props> = ({ 
-  users, setUsers, onDeleteUser, matches, setMatches, tickets, setTickets, settings, setSettings, balanceRequests, setBalanceRequests 
+  users, setUsers, onDeleteUser, matches, setMatches, tickets, setTickets, settings, setSettings, balanceRequests, setBalanceRequests, currentUser, onUpdateSingleUser 
 }) => {
   const [tab, setTab] = useState<'EQUIPE' | 'JOGOS' | 'CONFIG'>('EQUIPE');
   const [newUser, setNewUser] = useState({ name: '', username: '', password: '', role: UserRole.SUPERVISOR });
   const [adjustAmounts, setAdjustAmounts] = useState<Record<string, string>>({});
+  
+  // Estados para edição de acesso Admin
+  const [adminAuth, setAdminAuth] = useState({
+    username: currentUser.username,
+    password: currentUser.password
+  });
 
   const myDirectUsers = users.filter(u => u.parent_id === 'admin-1' && u.role !== UserRole.ADMIN);
   const pendingForMe = balanceRequests.filter(r => r.status === 'PENDING' && users.find(u => u.id === r.user_id)?.parent_id === 'admin-1');
@@ -52,6 +60,19 @@ const AdminDashboard: React.FC<Props> = ({
     setUsers(updatedUsers);
     setBalanceRequests(balanceRequests.map(r => r.id === req.id ? { ...r, status: 'APPROVED' } : r));
     alert("Saldo aprovado e creditado!");
+  };
+
+  const handleUpdateAdminAuth = () => {
+    if (!adminAuth.username || !adminAuth.password) return alert("Preencha o login e a senha!");
+    
+    // Verifica se o login novo não pertence a outro usuário
+    if (users.some(u => u.username === adminAuth.username && u.id !== currentUser.id)) {
+      return alert("Este login já está sendo usado por outro membro da rede!");
+    }
+
+    const updatedAdmin = { ...currentUser, ...adminAuth };
+    onUpdateSingleUser(updatedAdmin);
+    alert("Dados de acesso Master atualizados com sucesso!");
   };
 
   return (
@@ -211,31 +232,73 @@ const AdminDashboard: React.FC<Props> = ({
       )}
 
       {tab === 'CONFIG' && (
-        <div className="max-w-2xl mx-auto space-y-8 animate-in zoom-in-95">
-          <div className="glass-card p-10 rounded-[3rem] border-t-4 border-[#a3e635] space-y-8 shadow-2xl">
-            <h3 className="text-2xl font-impact italic uppercase text-white text-center">Configurações de Arena</h3>
-            
-            <div className="space-y-4">
-              <div className="flex flex-col gap-2">
-                <label className="text-[10px] font-black opacity-40 uppercase tracking-widest px-2">Chave PIX Oficial (Recebimento Direto)</label>
-                <input 
-                  value={settings.pix_key} 
-                  onChange={e => setSettings({...settings, pix_key: e.target.value})} 
-                  placeholder="admin@dgrau.com"
-                  className="w-full bg-black/40 border border-white/10 rounded-2xl p-5 text-white outline-none focus:border-[#a3e635] transition-all font-bold shadow-inner"
-                />
+        <div className="max-w-4xl mx-auto space-y-8 animate-in zoom-in-95">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            {/* CARD 1: CONFIGS DA ARENA */}
+            <div className="glass-card p-8 rounded-[3rem] border-t-4 border-[#a3e635] space-y-6 shadow-2xl">
+              <div className="flex items-center gap-4 mb-4">
+                <div className="w-12 h-12 bg-[#a3e635]/10 rounded-2xl flex items-center justify-center text-[#a3e635]">
+                   <i className="fa-solid fa-gears text-xl"></i>
+                </div>
+                <h3 className="text-xl font-impact italic uppercase text-white">Arena Mestra</h3>
+              </div>
+              
+              <div className="space-y-4">
+                <div className="flex flex-col gap-2">
+                  <label className="text-[9px] font-black opacity-40 uppercase tracking-widest px-2">Chave PIX Recebimento</label>
+                  <input 
+                    value={settings.pix_key} 
+                    onChange={e => setSettings({...settings, pix_key: e.target.value})} 
+                    className="w-full bg-black/40 border border-white/10 rounded-2xl p-4 text-white outline-none focus:border-[#a3e635] transition-all font-bold text-sm"
+                  />
+                </div>
+
+                <div className="p-5 bg-white/5 rounded-2xl border border-white/5">
+                  <p className="font-impact italic text-white uppercase text-xs mb-3">Status do Mercado</p>
+                  <button 
+                    onClick={() => setSettings({...settings, is_market_open: !settings.is_market_open})}
+                    className={`w-full py-3 rounded-xl font-impact italic text-[10px] uppercase transition-all shadow-lg ${settings.is_market_open ? 'bg-[#a3e635] text-black' : 'bg-red-600 text-white'}`}
+                  >
+                    {settings.is_market_open ? 'MERCADO ABERTO' : 'MERCADO FECHADO'}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* CARD 2: SEGURANÇA ADMIN (NOVO) */}
+            <div className="glass-card p-8 rounded-[3rem] border-t-4 border-blue-500 space-y-6 shadow-2xl">
+              <div className="flex items-center gap-4 mb-4">
+                <div className="w-12 h-12 bg-blue-500/10 rounded-2xl flex items-center justify-center text-blue-500">
+                   <i className="fa-solid fa-user-shield text-xl"></i>
+                </div>
+                <h3 className="text-xl font-impact italic uppercase text-white">Segurança Master</h3>
               </div>
 
-              <div className="flex items-center justify-between p-6 bg-white/5 rounded-2xl border border-white/5 group hover:bg-white/10 transition-all">
-                <div>
-                  <p className="font-impact italic text-white uppercase text-sm">Status do Mercado</p>
-                  <p className="text-[9px] font-black opacity-40 uppercase tracking-widest">Bloqueia novas apostas em toda a plataforma</p>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-[9px] font-black opacity-40 uppercase tracking-widest px-2">Novo Login Master</label>
+                  <input 
+                    value={adminAuth.username} 
+                    onChange={e => setAdminAuth({...adminAuth, username: e.target.value})} 
+                    className="w-full bg-black/40 border border-white/10 rounded-2xl p-4 text-white outline-none focus:border-blue-500 transition-all font-bold text-sm"
+                  />
                 </div>
+
+                <div className="space-y-2">
+                  <label className="text-[9px] font-black opacity-40 uppercase tracking-widest px-2">Nova Senha Master</label>
+                  <input 
+                    type="text"
+                    value={adminAuth.password} 
+                    onChange={e => setAdminAuth({...adminAuth, password: e.target.value})} 
+                    className="w-full bg-black/40 border border-white/10 rounded-2xl p-4 text-white outline-none focus:border-blue-500 transition-all font-bold text-sm"
+                  />
+                </div>
+
                 <button 
-                  onClick={() => setSettings({...settings, is_market_open: !settings.is_market_open})}
-                  className={`px-8 py-3 rounded-xl font-impact italic text-[11px] uppercase transition-all shadow-lg ${settings.is_market_open ? 'bg-[#a3e635] text-black shadow-[#a3e635]/20' : 'bg-red-600 text-white shadow-red-600/20'}`}
+                  onClick={handleUpdateAdminAuth}
+                  className="w-full py-4 bg-blue-600 text-white font-impact italic rounded-xl uppercase text-[10px] tracking-widest hover:bg-blue-500 transition-all shadow-xl shadow-blue-600/20"
                 >
-                  {settings.is_market_open ? 'MERCADO ABERTO' : 'MERCADO FECHADO'}
+                  Atualizar Acesso Admin
                 </button>
               </div>
             </div>

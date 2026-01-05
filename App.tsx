@@ -89,16 +89,13 @@ const App: React.FC = () => {
       // 2. Escuta de Canais Realtime (Somente se configurado)
       if (isSupabaseConfigured) {
         const channel = supabase.channel('arena-realtime')
-          // Sincronizar Jogos/Grade
           .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, payload => {
             const updated = payload.new as Match;
             setMatches(prev => prev.map(m => m.id === updated.id ? updated : m));
           })
-          // Sincronizar Configurações (Chave PIX e Status de Mercado)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, payload => {
             setSettings(payload.new as AppSettings);
           })
-          // Sincronizar Usuários (Saldos, Novos cadastros, Edições de Perfil)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, payload => {
             if (payload.eventType === 'DELETE') {
               setUsers(prev => prev.filter(u => u.id !== payload.old.id));
@@ -109,14 +106,12 @@ const App: React.FC = () => {
                 const exists = prev.find(u => u.id === updated.id);
                 return exists ? prev.map(u => u.id === updated.id ? updated : u) : [updated, ...prev];
               });
-              // Se o usuário alterado for EU, atualiza minha sessão
               if (currentUser?.id === updated.id) {
                 setCurrentUser(updated);
                 localStorage.setItem(SESSION_KEY, JSON.stringify(updated));
               }
             }
           })
-          // Sincronizar Pedidos de Saldo
           .on('postgres_changes', { event: '*', schema: 'public', table: 'balance_requests' }, payload => {
             if (payload.eventType === 'INSERT') {
               setBalanceRequests(prev => [payload.new as BalanceRequest, ...prev]);
@@ -125,7 +120,6 @@ const App: React.FC = () => {
               setBalanceRequests(prev => prev.map(r => r.id === updated.id ? updated : r));
             }
           })
-          // Sincronizar Bilhetes
           .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'tickets' }, payload => {
             setTickets(prev => [payload.new as Ticket, ...prev]);
           })
@@ -138,14 +132,12 @@ const App: React.FC = () => {
     startSync();
   }, [currentUser?.id]);
 
-  // Backup persistente no LocalStorage (para funcionamento offline/instável)
   useEffect(() => {
     if (users.length > 0) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({ users, matches, tickets, settings, balanceRequests }));
     }
   }, [users, matches, tickets, settings, balanceRequests]);
 
-  // Handlers de Ações (Sempre tentam o Supabase primeiro)
   const handleUpdateMatches = async (updater: any) => {
     const next = typeof updater === 'function' ? updater(matches) : updater;
     setMatches(next);
@@ -160,6 +152,11 @@ const App: React.FC = () => {
 
   const handleUpdateSingleUser = async (updatedUser: User) => {
     setUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
+    // Importante: Atualiza o currentUser se for o mesmo usuário logado
+    if (currentUser && currentUser.id === updatedUser.id) {
+      setCurrentUser(updatedUser);
+      localStorage.setItem(SESSION_KEY, JSON.stringify(updatedUser));
+    }
     if (isSupabaseConfigured) await supabase.from('users').upsert(updatedUser);
   };
 
@@ -179,7 +176,6 @@ const App: React.FC = () => {
     setView('BET');
   };
 
-  // Se não estiver logado, exibe tela de login. O login usa a lista sincronizada de users.
   if (!currentUser) return <Login onLogin={setCurrentUser} users={users} setUsers={handleUpdateUsers} />;
 
   const pendingCount = balanceRequests.filter(r => r.status === 'PENDING' && (
@@ -204,6 +200,8 @@ const App: React.FC = () => {
             matches={matches} setMatches={handleUpdateMatches} 
             tickets={tickets} settings={settings} setSettings={handleUpdateSettings}
             balanceRequests={balanceRequests} setBalanceRequests={setBalanceRequests}
+            currentUser={currentUser}
+            onUpdateSingleUser={handleUpdateSingleUser}
           />
         )}
         {view === 'DASHBOARD' && currentUser.role === UserRole.SUPERVISOR && <SupervisorDashboard currentUser={currentUser} setCurrentUser={setCurrentUser} users={users} setUsers={handleUpdateUsers} onDeleteUser={handleDeleteUser} tickets={tickets} balanceRequests={balanceRequests} setBalanceRequests={setBalanceRequests} />}
