@@ -11,7 +11,7 @@ interface Props {
   tickets: Ticket[];
   setTickets?: React.Dispatch<React.SetStateAction<Ticket[]>>;
   settings: AppSettings;
-  setSettings: React.Dispatch<React.SetStateAction<AppSettings>>;
+  setSettings: (s: AppSettings) => void;
   balanceRequests: BalanceRequest[];
   setBalanceRequests: React.Dispatch<React.SetStateAction<BalanceRequest[]>>;
 }
