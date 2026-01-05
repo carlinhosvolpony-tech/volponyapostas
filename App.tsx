@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { User, UserRole, Match, Ticket, AppSettings, BalanceRequest } from './types';
 import Login from './components/Login';
 import AdminDashboard from './components/AdminDashboard';
@@ -49,118 +49,103 @@ const App: React.FC = () => {
   const [settings, setSettings] = useState<AppSettings>({ pix_key: ADMIN_PIX, is_market_open: true });
   const [view, setView] = useState<'BET' | 'HISTORY' | 'WALLET' | 'DASHBOARD'>('BET');
 
-  // --- AUTOMAÇÃO DE SINCRONIZAÇÃO E AUTO-SEED ---
+  // --- NÚCLEO DE SINCRONIZAÇÃO EM TEMPO REAL ---
   useEffect(() => {
-    const initApp = async () => {
-      if (!isSupabaseConfigured) {
-        // Fallback para LocalStorage
-        try {
-          const saved = localStorage.getItem(STORAGE_KEY);
-          if (saved) {
-            const parsed = JSON.parse(saved);
-            let currentUsers = parsed.users || [];
-            
-            // Auto-Seed Admin se não existir
-            if (!currentUsers.some((u: User) => u.role === UserRole.ADMIN)) {
-              currentUsers = [DEFAULT_ADMIN, ...currentUsers];
-            }
-            
-            setUsers(currentUsers);
-            if (parsed.matches) setMatches(parsed.matches);
-            if (parsed.tickets) setTickets(parsed.tickets);
-            if (parsed.settings) setSettings(parsed.settings);
-            if (parsed.balanceRequests) setBalanceRequests(parsed.balanceRequests);
-          } else {
-            // App virgem, cria o admin
-            setUsers([DEFAULT_ADMIN]);
-          }
-        } catch {}
-        return;
+    const startSync = async () => {
+      // 1. Carregamento Inicial (Prioridade: Supabase > LocalStorage)
+      if (isSupabaseConfigured) {
+        const { data: u } = await supabase.from('users').select('*');
+        const { data: m } = await supabase.from('matches').select('*').order('id', { ascending: true });
+        const { data: t } = await supabase.from('tickets').select('*').order('timestamp', { ascending: false });
+        const { data: r } = await supabase.from('balance_requests').select('*').order('created_at', { ascending: false });
+        const { data: s } = await supabase.from('settings').select('*').single();
+
+        if (m && m.length > 0) setMatches(m);
+        if (t) setTickets(t);
+        if (r) setBalanceRequests(r);
+        if (s) setSettings(s);
+
+        // Lógica de Auto-Seed para o Admin
+        let userList = u || [];
+        if (!userList.some(user => user.role === UserRole.ADMIN)) {
+          await supabase.from('users').upsert(DEFAULT_ADMIN);
+          userList = [DEFAULT_ADMIN, ...userList];
+        }
+        setUsers(userList);
+      } else {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          setUsers(parsed.users || [DEFAULT_ADMIN]);
+          setMatches(parsed.matches || INITIAL_MATCHES);
+          setTickets(parsed.tickets || []);
+          setSettings(parsed.settings || { pix_key: ADMIN_PIX, is_market_open: true });
+          setBalanceRequests(parsed.balanceRequests || []);
+        } else {
+          setUsers([DEFAULT_ADMIN]);
+        }
       }
 
-      // Supabase Ligado
-      const fetchData = async () => {
-        const { data: m } = await supabase.from('matches').select('*').order('id', { ascending: true });
-        if (m && m.length > 0) setMatches(m);
-        
-        const { data: u } = await supabase.from('users').select('*');
-        let currentUsers = u || [];
-
-        // Auto-Seed no Supabase se não houver Admin
-        if (!currentUsers.some((u: User) => u.role === UserRole.ADMIN)) {
-          await supabase.from('users').upsert(DEFAULT_ADMIN);
-          currentUsers = [DEFAULT_ADMIN, ...currentUsers];
-        }
-        setUsers(currentUsers);
-        
-        const { data: t } = await supabase.from('tickets').select('*').order('timestamp', { ascending: false });
-        if (t) setTickets(t);
-        
-        const { data: r } = await supabase.from('balance_requests').select('*').order('created_at', { ascending: false });
-        if (r) setBalanceRequests(r);
-
-        const { data: s } = await supabase.from('settings').select('*').single();
-        if (s) setSettings(s);
-      };
-      
-      fetchData();
-
-      // Realtime subscription
-      const channel = supabase.channel('global-sync')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, payload => {
-          if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
+      // 2. Escuta de Canais Realtime (Somente se configurado)
+      if (isSupabaseConfigured) {
+        const channel = supabase.channel('arena-realtime')
+          // Sincronizar Jogos/Grade
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, payload => {
             const updated = payload.new as Match;
-            setMatches(current => current.map(m => m.id === updated.id ? updated : m));
-          }
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, payload => {
-          if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
+            setMatches(prev => prev.map(m => m.id === updated.id ? updated : m));
+          })
+          // Sincronizar Configurações (Chave PIX e Status de Mercado)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'settings' }, payload => {
             setSettings(payload.new as AppSettings);
-          }
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, payload => {
-          if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
-            const updated = payload.new as User;
-            setUsers(current => {
-              const exists = current.find(u => u.id === updated.id);
-              if (exists) return current.map(u => u.id === updated.id ? updated : u);
-              return [...current, updated];
-            });
-            if (currentUser && updated.id === currentUser.id) {
-              setCurrentUser(updated);
-              localStorage.setItem(SESSION_KEY, JSON.stringify(updated));
+          })
+          // Sincronizar Usuários (Saldos, Novos cadastros, Edições de Perfil)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, payload => {
+            if (payload.eventType === 'DELETE') {
+              setUsers(prev => prev.filter(u => u.id !== payload.old.id));
+              if (currentUser?.id === payload.old.id) handleLogout();
+            } else {
+              const updated = payload.new as User;
+              setUsers(prev => {
+                const exists = prev.find(u => u.id === updated.id);
+                return exists ? prev.map(u => u.id === updated.id ? updated : u) : [updated, ...prev];
+              });
+              // Se o usuário alterado for EU, atualiza minha sessão
+              if (currentUser?.id === updated.id) {
+                setCurrentUser(updated);
+                localStorage.setItem(SESSION_KEY, JSON.stringify(updated));
+              }
             }
-          } else if (payload.eventType === 'DELETE') {
-            setUsers(current => current.filter(u => u.id !== payload.old.id));
-            if (currentUser && payload.old.id === currentUser.id) handleLogout();
-          }
-        })
-        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'tickets' }, payload => {
-          setTickets(prev => [payload.new as Ticket, ...prev]);
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'balance_requests' }, payload => {
-          if (payload.eventType === 'INSERT') {
-            setBalanceRequests(prev => [payload.new as BalanceRequest, ...prev]);
-          } else if (payload.eventType === 'UPDATE') {
-            const updated = payload.new as BalanceRequest;
-            setBalanceRequests(prev => prev.map(r => r.id === updated.id ? updated : r));
-          }
-        })
-        .subscribe();
+          })
+          // Sincronizar Pedidos de Saldo
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'balance_requests' }, payload => {
+            if (payload.eventType === 'INSERT') {
+              setBalanceRequests(prev => [payload.new as BalanceRequest, ...prev]);
+            } else {
+              const updated = payload.new as BalanceRequest;
+              setBalanceRequests(prev => prev.map(r => r.id === updated.id ? updated : r));
+            }
+          })
+          // Sincronizar Bilhetes
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'tickets' }, payload => {
+            setTickets(prev => [payload.new as Ticket, ...prev]);
+          })
+          .subscribe();
 
-      return () => { supabase.removeChannel(channel); };
+        return () => { supabase.removeChannel(channel); };
+      }
     };
 
-    initApp();
+    startSync();
   }, [currentUser?.id]);
 
+  // Backup persistente no LocalStorage (para funcionamento offline/instável)
   useEffect(() => {
     if (users.length > 0) {
-      const data = { users, matches, tickets, settings, balanceRequests };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ users, matches, tickets, settings, balanceRequests }));
     }
   }, [users, matches, tickets, settings, balanceRequests]);
 
+  // Handlers de Ações (Sempre tentam o Supabase primeiro)
   const handleUpdateMatches = async (updater: any) => {
     const next = typeof updater === 'function' ? updater(matches) : updater;
     setMatches(next);
@@ -173,24 +158,19 @@ const App: React.FC = () => {
     if (isSupabaseConfigured) await supabase.from('users').upsert(next);
   };
 
-  const handleSingleUserUpdate = async (updatedUser: User) => {
+  const handleUpdateSingleUser = async (updatedUser: User) => {
     setUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
-    if (updatedUser.id === currentUser?.id) {
-      setCurrentUser(updatedUser);
-      localStorage.setItem(SESSION_KEY, JSON.stringify(updatedUser));
-    }
     if (isSupabaseConfigured) await supabase.from('users').upsert(updatedUser);
-  };
-
-  const handleUpdateSettings = async (nextSettings: AppSettings) => {
-    setSettings(nextSettings);
-    if (isSupabaseConfigured) await supabase.from('settings').upsert({ id: 1, ...nextSettings });
   };
 
   const handleDeleteUser = async (userId: string) => {
     setUsers(prev => prev.filter(u => u.id !== userId));
-    if (currentUser && currentUser.id === userId) handleLogout();
     if (isSupabaseConfigured) await supabase.from('users').delete().eq('id', userId);
+  };
+
+  const handleUpdateSettings = async (next: AppSettings) => {
+    setSettings(next);
+    if (isSupabaseConfigured) await supabase.from('settings').upsert({ id: 1, ...next });
   };
 
   const handleLogout = () => {
@@ -199,6 +179,7 @@ const App: React.FC = () => {
     setView('BET');
   };
 
+  // Se não estiver logado, exibe tela de login. O login usa a lista sincronizada de users.
   if (!currentUser) return <Login onLogin={setCurrentUser} users={users} setUsers={handleUpdateUsers} />;
 
   const pendingCount = balanceRequests.filter(r => r.status === 'PENDING' && (
@@ -207,7 +188,14 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#020617] text-white pt-32 pb-20">
-      <Navbar user={currentUser} view={view} setView={setView} onLogout={handleLogout} isMarketOpen={settings.is_market_open} pendingCount={pendingCount} />
+      <Navbar 
+        user={currentUser} 
+        view={view} 
+        setView={setView} 
+        onLogout={handleLogout} 
+        isMarketOpen={settings.is_market_open} 
+        pendingCount={pendingCount} 
+      />
       
       <main className="container mx-auto px-4">
         {view === 'DASHBOARD' && currentUser.role === UserRole.ADMIN && (
@@ -222,7 +210,7 @@ const App: React.FC = () => {
         {view === 'DASHBOARD' && currentUser.role === UserRole.BOOKIE && <BookieDashboard currentUser={currentUser} setCurrentUser={setCurrentUser} users={users} setUsers={handleUpdateUsers} onDeleteUser={handleDeleteUser} tickets={tickets} balanceRequests={balanceRequests} setBalanceRequests={setBalanceRequests} />}
         {view === 'BET' && <BettingArea matches={matches} user={currentUser} onBet={async t => { setTickets([t, ...tickets]); if(isSupabaseConfigured) await supabase.from('tickets').insert(t); }} setUser={setCurrentUser} isMarketOpen={settings.is_market_open} />}
         {view === 'HISTORY' && <TicketHistory tickets={tickets.filter(t => t.user_id === currentUser.id || currentUser.role === UserRole.ADMIN)} currentUser={currentUser} setView={setView} />}
-        {view === 'WALLET' && <Wallet user={currentUser} settings={settings} users={users} balanceRequests={balanceRequests} setBalanceRequests={setBalanceRequests} setView={setView} onUpdateUser={handleSingleUserUpdate} onDeleteUser={handleDeleteUser} />}
+        {view === 'WALLET' && <Wallet user={currentUser} settings={settings} users={users} balanceRequests={balanceRequests} setBalanceRequests={setBalanceRequests} setView={setView} onUpdateUser={handleUpdateSingleUser} onDeleteUser={handleDeleteUser} />}
       </main>
     </div>
   );
