@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
 import { User, UserRole, Match, Ticket, AppSettings, BalanceRequest } from '../types';
+import { supabase, isSupabaseConfigured } from '../supabaseClient';
 
 interface Props {
   users: User[];
@@ -25,7 +26,6 @@ const AdminDashboard: React.FC<Props> = ({
   const [newUser, setNewUser] = useState({ name: '', username: '', password: '', role: UserRole.SUPERVISOR });
   const [adjustAmounts, setAdjustAmounts] = useState<Record<string, string>>({});
   
-  // Estados para edição de acesso Admin
   const [adminAuth, setAdminAuth] = useState({
     username: currentUser.username,
     password: currentUser.password
@@ -55,21 +55,39 @@ const AdminDashboard: React.FC<Props> = ({
     setMatches(prev => prev.map(m => m.id === id ? { ...m, [field]: value } : m));
   };
 
-  const handleApproveBalance = (req: BalanceRequest) => {
+  const handleApproveBalance = async (req: BalanceRequest) => {
     const updatedUsers = users.map(u => u.id === req.user_id ? { ...u, balance: u.balance + req.amount } : u);
+    const targetUser = updatedUsers.find(u => u.id === req.user_id);
+    
+    // Atualiza o usuário
     setUsers(updatedUsers);
-    setBalanceRequests(balanceRequests.map(r => r.id === req.id ? { ...r, status: 'APPROVED' } : r));
+    if (isSupabaseConfigured && targetUser) {
+      await supabase.from('users').update({ balance: targetUser.balance }).eq('id', targetUser.id);
+    }
+
+    // Atualiza o status do pedido
+    setBalanceRequests(prev => prev.map(r => r.id === req.id ? { ...r, status: 'APPROVED' } : r));
+    if (isSupabaseConfigured) {
+      await supabase.from('balance_requests').update({ status: 'APPROVED' }).eq('id', req.id);
+    }
     alert("Saldo aprovado e creditado!");
+  };
+
+  const handleRejectBalance = async (req: BalanceRequest) => {
+    if (!confirm("Deseja realmente recusar este pedido de saldo?")) return;
+    
+    setBalanceRequests(prev => prev.map(r => r.id === req.id ? { ...r, status: 'REJECTED' } : r));
+    if (isSupabaseConfigured) {
+      await supabase.from('balance_requests').update({ status: 'REJECTED' }).eq('id', req.id);
+    }
+    alert("Pedido recusado com sucesso.");
   };
 
   const handleUpdateAdminAuth = () => {
     if (!adminAuth.username || !adminAuth.password) return alert("Preencha o login e a senha!");
-    
-    // Verifica se o login novo não pertence a outro usuário
     if (users.some(u => u.username === adminAuth.username && u.id !== currentUser.id)) {
       return alert("Este login já está sendo usado por outro membro da rede!");
     }
-
     const updatedAdmin = { ...currentUser, ...adminAuth };
     onUpdateSingleUser(updatedAdmin);
     alert("Dados de acesso Master atualizados com sucesso!");
@@ -101,13 +119,16 @@ const AdminDashboard: React.FC<Props> = ({
                         <p className="text-[9px] font-black opacity-40 uppercase">{req.user_name}</p>
                         <p className="font-impact italic text-white text-2xl">R$ {req.amount.toFixed(2)}</p>
                       </div>
-                      <button onClick={() => handleApproveBalance(req)} className="px-6 py-3 bg-[#a3e635] text-black font-impact italic rounded-xl uppercase text-[10px] hover:scale-105 transition-all shadow-lg">Liberar Crédito</button>
+                      <div className="flex gap-2">
+                        <button onClick={() => handleRejectBalance(req)} className="px-4 py-3 bg-red-600/10 text-red-500 border border-red-600/20 font-impact italic rounded-xl uppercase text-[10px] hover:bg-red-600 hover:text-white transition-all">Recusar</button>
+                        <button onClick={() => handleApproveBalance(req)} className="px-6 py-3 bg-[#a3e635] text-black font-impact italic rounded-xl uppercase text-[10px] hover:scale-105 transition-all shadow-lg">Liberar Crédito</button>
+                      </div>
                     </div>
                   ))}
                </div>
             </div>
           )}
-
+          
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="glass-card p-8 rounded-[2.5rem] border-t-4 border-[#a3e635]">
               <h3 className="text-xl font-impact italic uppercase mb-6 text-white">Novo Cadastro</h3>
@@ -128,11 +149,7 @@ const AdminDashboard: React.FC<Props> = ({
               {myDirectUsers.map(u => (
                 <div key={u.id} className="match-card p-4 rounded-3xl border border-white/5 flex justify-between items-center group relative">
                   <div className="flex items-center gap-4">
-                    <button 
-                      onClick={() => onDeleteUser(u.id)}
-                      className="w-10 h-10 bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white rounded-xl transition-all flex items-center justify-center border border-red-500/20"
-                      title="Excluir Usuário"
-                    >
+                    <button onClick={() => onDeleteUser(u.id)} className="w-10 h-10 bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white rounded-xl transition-all flex items-center justify-center border border-red-500/20">
                       <i className="fa-solid fa-trash-can text-xs"></i>
                     </button>
                     <div>
@@ -141,16 +158,14 @@ const AdminDashboard: React.FC<Props> = ({
                     </div>
                   </div>
                   <div className="flex gap-2">
-                     <input 
-                      type="text" 
-                      placeholder="R$" 
-                      value={adjustAmounts[u.id] || ''} 
-                      onChange={(e) => setAdjustAmounts({...adjustAmounts, [u.id]: e.target.value})} 
-                      className="w-16 bg-black/40 border border-white/5 rounded-xl px-2 text-white text-[10px] outline-none text-center focus:border-[#a3e635]" 
-                     />
+                     <input type="text" placeholder="R$" value={adjustAmounts[u.id] || ''} onChange={(e) => setAdjustAmounts({...adjustAmounts, [u.id]: e.target.value})} className="w-16 bg-black/40 border border-white/5 rounded-xl px-2 text-white text-[10px] outline-none text-center focus:border-[#a3e635]" />
                      <button onClick={() => {
                        const amt = parseFloat((adjustAmounts[u.id] || '0').replace(',', '.'));
-                       if (amt > 0) setUsers(users.map(usr => usr.id === u.id ? {...usr, balance: usr.balance + amt} : usr));
+                       if (amt > 0) {
+                         const updatedUsers = users.map(usr => usr.id === u.id ? {...usr, balance: usr.balance + amt} : usr);
+                         setUsers(updatedUsers);
+                         if (isSupabaseConfigured) supabase.from('users').update({ balance: u.balance + amt }).eq('id', u.id);
+                       }
                        setAdjustAmounts({...adjustAmounts, [u.id]: ''});
                      }} className="w-8 h-8 bg-[#a3e635] text-black rounded-lg font-black hover:scale-110 active:scale-90 transition-all shadow-lg">+</button>
                   </div>
@@ -167,7 +182,6 @@ const AdminDashboard: React.FC<Props> = ({
             <h3 className="text-xl font-impact italic uppercase text-white">Editor da Grade Oficial</h3>
             <span className="text-[10px] font-black opacity-30 uppercase tracking-widest">12 Jogos Obrigatórios</span>
           </div>
-          
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {matches.map((match, index) => (
               <div key={match.id} className="match-card p-6 rounded-[2.5rem] border border-white/5 space-y-4 relative overflow-hidden">
@@ -176,57 +190,28 @@ const AdminDashboard: React.FC<Props> = ({
                     <span className="text-[10px] font-black text-[#a3e635] uppercase">Jogo #{index + 1}</span>
                   </div>
                   <div className="flex-1 ml-4">
-                    <input 
-                      value={match.league} 
-                      onChange={(e) => handleUpdateMatch(match.id, 'league', e.target.value)}
-                      className="w-full bg-white/5 px-3 py-1 rounded-lg text-[10px] font-black text-white/60 uppercase outline-none focus:text-[#a3e635] focus:bg-white/10 transition-all"
-                      placeholder="NOME DA LIGA / CAMPEONATO"
-                    />
+                    <input value={match.league} onChange={(e) => handleUpdateMatch(match.id, 'league', e.target.value)} className="w-full bg-white/5 px-3 py-1 rounded-lg text-[10px] font-black text-white/60 uppercase outline-none focus:text-[#a3e635] focus:bg-white/10 transition-all" placeholder="NOME DA LIGA" />
                   </div>
                 </div>
-
                 <div className="grid grid-cols-[1fr_auto_1fr] gap-4 items-center">
                   <div className="space-y-1">
                     <label className="text-[8px] font-black opacity-20 uppercase ml-2 tracking-widest">Casa</label>
-                    <input 
-                      value={match.home} 
-                      onChange={(e) => handleUpdateMatch(match.id, 'home', e.target.value)}
-                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-xs font-impact italic text-white outline-none focus:border-[#a3e635] transition-all"
-                      placeholder="TIME CASA"
-                    />
+                    <input value={match.home} onChange={(e) => handleUpdateMatch(match.id, 'home', e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-xs font-impact italic text-white outline-none focus:border-[#a3e635] transition-all" placeholder="TIME CASA" />
                   </div>
                   <div className="text-white/10 font-black italic text-xs pt-4">VS</div>
                   <div className="space-y-1 text-right">
                     <label className="text-[8px] font-black opacity-20 uppercase mr-2 tracking-widest">Fora</label>
-                    <input 
-                      value={match.away} 
-                      onChange={(e) => handleUpdateMatch(match.id, 'away', e.target.value)}
-                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-xs font-impact italic text-white outline-none focus:border-[#a3e635] text-right transition-all"
-                      placeholder="TIME VISITANTE"
-                    />
+                    <input value={match.away} onChange={(e) => handleUpdateMatch(match.id, 'away', e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-xs font-impact italic text-white outline-none focus:border-[#a3e635] text-right transition-all" placeholder="TIME VISITANTE" />
                   </div>
                 </div>
-
                 <div className="flex items-center gap-4 pt-2 border-t border-white/5 mt-2">
                    <div className="flex items-center gap-2 bg-black/40 px-4 py-2 rounded-xl border border-white/5">
                       <i className="fa-regular fa-clock text-[#a3e635] text-[10px]"></i>
-                      <input 
-                        value={match.time} 
-                        onChange={(e) => handleUpdateMatch(match.id, 'time', e.target.value)}
-                        className="bg-transparent text-[10px] font-black text-white outline-none focus:text-[#a3e635] w-14"
-                        placeholder="16:00"
-                      />
-                   </div>
-                   <div className="flex-1 text-[9px] font-black text-white/10 uppercase tracking-widest text-right italic">
-                     Ajustes em tempo real
+                      <input value={match.time} onChange={(e) => handleUpdateMatch(match.id, 'time', e.target.value)} className="bg-transparent text-[10px] font-black text-white outline-none focus:text-[#a3e635] w-14" placeholder="16:00" />
                    </div>
                 </div>
               </div>
             ))}
-          </div>
-
-          <div className="p-10 glass-card rounded-[3rem] text-center border-dashed border-2 border-white/5">
-            <p className="text-[10px] font-black opacity-20 uppercase tracking-[0.5em]">As alterações são propagadas instantaneamente para todos os usuários</p>
           </div>
         </div>
       )}
@@ -234,7 +219,6 @@ const AdminDashboard: React.FC<Props> = ({
       {tab === 'CONFIG' && (
         <div className="max-w-4xl mx-auto space-y-8 animate-in zoom-in-95">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            {/* CARD 1: CONFIGS DA ARENA */}
             <div className="glass-card p-8 rounded-[3rem] border-t-4 border-[#a3e635] space-y-6 shadow-2xl">
               <div className="flex items-center gap-4 mb-4">
                 <div className="w-12 h-12 bg-[#a3e635]/10 rounded-2xl flex items-center justify-center text-[#a3e635]">
@@ -242,30 +226,19 @@ const AdminDashboard: React.FC<Props> = ({
                 </div>
                 <h3 className="text-xl font-impact italic uppercase text-white">Arena Mestra</h3>
               </div>
-              
               <div className="space-y-4">
                 <div className="flex flex-col gap-2">
                   <label className="text-[9px] font-black opacity-40 uppercase tracking-widest px-2">Chave PIX Recebimento</label>
-                  <input 
-                    value={settings.pix_key} 
-                    onChange={e => setSettings({...settings, pix_key: e.target.value})} 
-                    className="w-full bg-black/40 border border-white/10 rounded-2xl p-4 text-white outline-none focus:border-[#a3e635] transition-all font-bold text-sm"
-                  />
+                  <input value={settings.pix_key} onChange={e => setSettings({...settings, pix_key: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-2xl p-4 text-white outline-none focus:border-[#a3e635] transition-all font-bold text-sm" />
                 </div>
-
                 <div className="p-5 bg-white/5 rounded-2xl border border-white/5">
                   <p className="font-impact italic text-white uppercase text-xs mb-3">Status do Mercado</p>
-                  <button 
-                    onClick={() => setSettings({...settings, is_market_open: !settings.is_market_open})}
-                    className={`w-full py-3 rounded-xl font-impact italic text-[10px] uppercase transition-all shadow-lg ${settings.is_market_open ? 'bg-[#a3e635] text-black' : 'bg-red-600 text-white'}`}
-                  >
+                  <button onClick={() => setSettings({...settings, is_market_open: !settings.is_market_open})} className={`w-full py-3 rounded-xl font-impact italic text-[10px] uppercase transition-all shadow-lg ${settings.is_market_open ? 'bg-[#a3e635] text-black' : 'bg-red-600 text-white'}`}>
                     {settings.is_market_open ? 'MERCADO ABERTO' : 'MERCADO FECHADO'}
                   </button>
                 </div>
               </div>
             </div>
-
-            {/* CARD 2: SEGURANÇA ADMIN (NOVO) */}
             <div className="glass-card p-8 rounded-[3rem] border-t-4 border-blue-500 space-y-6 shadow-2xl">
               <div className="flex items-center gap-4 mb-4">
                 <div className="w-12 h-12 bg-blue-500/10 rounded-2xl flex items-center justify-center text-blue-500">
@@ -273,33 +246,16 @@ const AdminDashboard: React.FC<Props> = ({
                 </div>
                 <h3 className="text-xl font-impact italic uppercase text-white">Segurança Master</h3>
               </div>
-
               <div className="space-y-4">
                 <div className="space-y-2">
                   <label className="text-[9px] font-black opacity-40 uppercase tracking-widest px-2">Novo Login Master</label>
-                  <input 
-                    value={adminAuth.username} 
-                    onChange={e => setAdminAuth({...adminAuth, username: e.target.value})} 
-                    className="w-full bg-black/40 border border-white/10 rounded-2xl p-4 text-white outline-none focus:border-blue-500 transition-all font-bold text-sm"
-                  />
+                  <input value={adminAuth.username} onChange={e => setAdminAuth({...adminAuth, username: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-2xl p-4 text-white outline-none focus:border-blue-500 transition-all font-bold text-sm" />
                 </div>
-
                 <div className="space-y-2">
                   <label className="text-[9px] font-black opacity-40 uppercase tracking-widest px-2">Nova Senha Master</label>
-                  <input 
-                    type="text"
-                    value={adminAuth.password} 
-                    onChange={e => setAdminAuth({...adminAuth, password: e.target.value})} 
-                    className="w-full bg-black/40 border border-white/10 rounded-2xl p-4 text-white outline-none focus:border-blue-500 transition-all font-bold text-sm"
-                  />
+                  <input type="text" value={adminAuth.password} onChange={e => setAdminAuth({...adminAuth, password: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-2xl p-4 text-white outline-none focus:border-blue-500 transition-all font-bold text-sm" />
                 </div>
-
-                <button 
-                  onClick={handleUpdateAdminAuth}
-                  className="w-full py-4 bg-blue-600 text-white font-impact italic rounded-xl uppercase text-[10px] tracking-widest hover:bg-blue-500 transition-all shadow-xl shadow-blue-600/20"
-                >
-                  Atualizar Acesso Admin
-                </button>
+                <button onClick={handleUpdateAdminAuth} className="w-full py-4 bg-blue-600 text-white font-impact italic rounded-xl uppercase text-[10px] tracking-widest hover:bg-blue-500 transition-all shadow-xl shadow-blue-600/20">Atualizar Acesso Admin</button>
               </div>
             </div>
           </div>

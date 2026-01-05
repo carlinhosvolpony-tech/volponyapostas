@@ -52,7 +52,6 @@ const App: React.FC = () => {
   // --- NÚCLEO DE SINCRONIZAÇÃO EM TEMPO REAL ---
   useEffect(() => {
     const startSync = async () => {
-      // 1. Carregamento Inicial (Prioridade: Supabase > LocalStorage)
       if (isSupabaseConfigured) {
         const { data: u } = await supabase.from('users').select('*');
         const { data: m } = await supabase.from('matches').select('*').order('id', { ascending: true });
@@ -65,7 +64,6 @@ const App: React.FC = () => {
         if (r) setBalanceRequests(r);
         if (s) setSettings(s);
 
-        // Lógica de Auto-Seed para o Admin
         let userList = u || [];
         if (!userList.some(user => user.role === UserRole.ADMIN)) {
           await supabase.from('users').upsert(DEFAULT_ADMIN);
@@ -86,7 +84,6 @@ const App: React.FC = () => {
         }
       }
 
-      // 2. Escuta de Canais Realtime (Somente se configurado)
       if (isSupabaseConfigured) {
         const channel = supabase.channel('arena-realtime')
           .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, payload => {
@@ -151,13 +148,19 @@ const App: React.FC = () => {
   };
 
   const handleUpdateSingleUser = async (updatedUser: User) => {
+    // 1. Atualiza na lista mestra (users)
     setUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
-    // Importante: Atualiza o currentUser se for o mesmo usuário logado
+    
+    // 2. Se for o usuário logado, atualiza o estado da sessão e o localStorage
     if (currentUser && currentUser.id === updatedUser.id) {
       setCurrentUser(updatedUser);
       localStorage.setItem(SESSION_KEY, JSON.stringify(updatedUser));
     }
-    if (isSupabaseConfigured) await supabase.from('users').upsert(updatedUser);
+    
+    // 3. Persiste no banco de dados
+    if (isSupabaseConfigured) {
+      await supabase.from('users').upsert(updatedUser);
+    }
   };
 
   const handleDeleteUser = async (userId: string) => {
@@ -206,7 +209,21 @@ const App: React.FC = () => {
         )}
         {view === 'DASHBOARD' && currentUser.role === UserRole.SUPERVISOR && <SupervisorDashboard currentUser={currentUser} setCurrentUser={setCurrentUser} users={users} setUsers={handleUpdateUsers} onDeleteUser={handleDeleteUser} tickets={tickets} balanceRequests={balanceRequests} setBalanceRequests={setBalanceRequests} />}
         {view === 'DASHBOARD' && currentUser.role === UserRole.BOOKIE && <BookieDashboard currentUser={currentUser} setCurrentUser={setCurrentUser} users={users} setUsers={handleUpdateUsers} onDeleteUser={handleDeleteUser} tickets={tickets} balanceRequests={balanceRequests} setBalanceRequests={setBalanceRequests} />}
-        {view === 'BET' && <BettingArea matches={matches} user={currentUser} onBet={async t => { setTickets([t, ...tickets]); if(isSupabaseConfigured) await supabase.from('tickets').insert(t); }} setUser={setCurrentUser} isMarketOpen={settings.is_market_open} />}
+        
+        {/* CORREÇÃO AQUI: Passando handleUpdateSingleUser para garantir que a aposta reduza o saldo globalmente */}
+        {view === 'BET' && (
+          <BettingArea 
+            matches={matches} 
+            user={currentUser} 
+            onBet={async t => { 
+              setTickets([t, ...tickets]); 
+              if(isSupabaseConfigured) await supabase.from('tickets').insert(t); 
+            }} 
+            setUser={handleUpdateSingleUser} 
+            isMarketOpen={settings.is_market_open} 
+          />
+        )}
+        
         {view === 'HISTORY' && <TicketHistory tickets={tickets.filter(t => t.user_id === currentUser.id || currentUser.role === UserRole.ADMIN)} currentUser={currentUser} setView={setView} />}
         {view === 'WALLET' && <Wallet user={currentUser} settings={settings} users={users} balanceRequests={balanceRequests} setBalanceRequests={setBalanceRequests} setView={setView} onUpdateUser={handleUpdateSingleUser} onDeleteUser={handleDeleteUser} />}
       </main>

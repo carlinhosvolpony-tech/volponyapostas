@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
 import { User, UserRole, Ticket, BalanceRequest } from '../types';
+import { supabase, isSupabaseConfigured } from '../supabaseClient';
 
 interface Props {
   currentUser: User;
@@ -24,12 +25,11 @@ const SupervisorDashboard: React.FC<Props> = ({ currentUser, setCurrentUser, use
   const myNetworkIds = [currentUser.id, ...myNetwork.map(u => u.id)];
   const pendingForMe = balanceRequests.filter(r => r.status === 'PENDING' && users.find(u => u.id === r.user_id)?.parent_id === currentUser.id);
   
-  // Cálculo Automático de Prestação de Contas da Rede
   const networkTickets = tickets.filter(t => myNetworkIds.includes(t.parent_id || '') || myNetworkIds.includes(t.user_id));
   const totalNetworkSales = networkTickets.reduce((sum, t) => sum + t.bet_amount, 0);
   const networkRetention = totalNetworkSales * (currentUser.commission_rate / 100);
   const toPayAdmin = totalNetworkSales - networkRetention;
-  const saldoLiberado = currentUser.balance; // Saldo que ele recebeu do Admin para distribuir
+  const saldoLiberado = currentUser.balance;
 
   const handleAddUser = (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,7 +43,7 @@ const SupervisorDashboard: React.FC<Props> = ({ currentUser, setCurrentUser, use
     alert("Membro cadastrado!");
   };
 
-  const handleApproveBalance = (req: BalanceRequest) => {
+  const handleApproveBalance = async (req: BalanceRequest) => {
     if (currentUser.balance < req.amount) return alert("Seu saldo de Supervisor é insuficiente!");
     
     const updatedUsers = users.map(u => {
@@ -53,20 +53,40 @@ const SupervisorDashboard: React.FC<Props> = ({ currentUser, setCurrentUser, use
     });
     setUsers(updatedUsers);
     const updatedMe = updatedUsers.find(u => u.id === currentUser.id);
-    if (updatedMe) setCurrentUser(updatedMe);
+    const updatedTarget = updatedUsers.find(u => u.id === req.user_id);
     
-    setBalanceRequests(balanceRequests.map(r => r.id === req.id ? { ...r, status: 'APPROVED' } : r));
+    if (updatedMe) {
+        setCurrentUser(updatedMe);
+        if (isSupabaseConfigured) await supabase.from('users').update({ balance: updatedMe.balance }).eq('id', updatedMe.id);
+    }
+    if (isSupabaseConfigured && updatedTarget) {
+        await supabase.from('users').update({ balance: updatedTarget.balance }).eq('id', updatedTarget.id);
+    }
+    
+    setBalanceRequests(prev => prev.map(r => r.id === req.id ? { ...r, status: 'APPROVED' } : r));
+    if (isSupabaseConfigured) await supabase.from('balance_requests').update({ status: 'APPROVED' }).eq('id', req.id);
     alert("Saldo aprovado e transferido!");
+  };
+
+  const handleRejectBalance = async (req: BalanceRequest) => {
+    if (!confirm("Deseja recusar este pedido de recarga?")) return;
+    
+    setBalanceRequests(prev => prev.map(r => r.id === req.id ? { ...r, status: 'REJECTED' } : r));
+    if (isSupabaseConfigured) {
+      await supabase.from('balance_requests').update({ status: 'REJECTED' }).eq('id', req.id);
+    }
+    alert("Pedido recusado.");
   };
 
   const handleUpdatePix = () => {
     const updatedUser = { ...currentUser, pix_key: pixInput };
     setCurrentUser(updatedUser);
     setUsers(users.map(u => u.id === currentUser.id ? updatedUser : u));
+    if (isSupabaseConfigured) supabase.from('users').update({ pix_key: pixInput }).eq('id', currentUser.id);
     alert("Chave PIX de Supervisor atualizada!");
   };
 
-  const handleTransfer = (memberId: string, isAdding: boolean) => {
+  const handleTransfer = async (memberId: string, isAdding: boolean) => {
     const amountStr = (adjustAmounts[memberId] || '0').replace(',', '.');
     const amount = parseFloat(amountStr);
     if (isNaN(amount) || amount <= 0) return alert("Valor inválido!");
@@ -79,7 +99,15 @@ const SupervisorDashboard: React.FC<Props> = ({ currentUser, setCurrentUser, use
     });
     setUsers(updatedUsers);
     const updatedMe = updatedUsers.find(u => u.id === currentUser.id);
-    if (updatedMe) setCurrentUser(updatedMe);
+    const updatedTarget = updatedUsers.find(u => u.id === memberId);
+    
+    if (updatedMe) {
+        setCurrentUser(updatedMe);
+        if (isSupabaseConfigured) await supabase.from('users').update({ balance: updatedMe.balance }).eq('id', updatedMe.id);
+    }
+    if (isSupabaseConfigured && updatedTarget) {
+        await supabase.from('users').update({ balance: updatedTarget.balance }).eq('id', updatedTarget.id);
+    }
     setAdjustAmounts({ ...adjustAmounts, [memberId]: '' });
   };
 
@@ -109,7 +137,10 @@ const SupervisorDashboard: React.FC<Props> = ({ currentUser, setCurrentUser, use
                         <p className="text-[9px] font-black opacity-40 uppercase">{req.user_name}</p>
                         <p className="font-impact italic text-white text-2xl">R$ {req.amount.toFixed(2)}</p>
                       </div>
-                      <button onClick={() => handleApproveBalance(req)} className="px-6 py-3 bg-[#a3e635] text-black font-impact italic rounded-xl uppercase text-[10px] hover:scale-105 transition-all shadow-lg">Aprovar Pedido</button>
+                      <div className="flex gap-2">
+                        <button onClick={() => handleRejectBalance(req)} className="px-4 py-3 bg-red-600/10 text-red-500 border border-red-600/20 font-impact italic rounded-xl uppercase text-[10px] hover:bg-red-600 hover:text-white transition-all">Recusar</button>
+                        <button onClick={() => handleApproveBalance(req)} className="px-6 py-3 bg-[#a3e635] text-black font-impact italic rounded-xl uppercase text-[10px] hover:scale-105 transition-all shadow-lg">Aprovar Pedido</button>
+                      </div>
                     </div>
                   ))}
                </div>
@@ -131,19 +162,15 @@ const SupervisorDashboard: React.FC<Props> = ({ currentUser, setCurrentUser, use
               </form>
             </div>
             <div className="lg:col-span-2 space-y-4">
-              <h3 className="text-[10px] font-black opacity-30 uppercase tracking-widest px-2">Gestão de Saldo da Equipe Direta</h3>
+              <h3 className="text-[10px] font-black opacity-30 uppercase tracking-widest px-2">Gestão de Saldo</h3>
               {myNetwork.map(u => (
                 <div key={u.id} className="match-card p-5 rounded-3xl border border-white/5 flex justify-between items-center group">
                   <div className="flex items-center gap-4">
-                    <button 
-                      onClick={() => onDeleteUser(u.id)}
-                      className="w-10 h-10 bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white rounded-xl transition-all flex items-center justify-center border border-red-500/20"
-                    >
+                    <button onClick={() => onDeleteUser(u.id)} className="w-10 h-10 bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white rounded-xl transition-all flex items-center justify-center border border-red-500/20">
                       <i className="fa-solid fa-trash-can text-xs"></i>
                     </button>
                     <div>
                       <p className="font-impact italic text-white uppercase text-sm">{u.name}</p>
-                      <p className="text-[10px] text-white/20 uppercase font-black">{u.role}</p>
                       <p className="text-[#a3e635] font-impact italic text-xs mt-1">Saldo: R$ {u.balance.toFixed(2)}</p>
                     </div>
                   </div>
@@ -165,51 +192,10 @@ const SupervisorDashboard: React.FC<Props> = ({ currentUser, setCurrentUser, use
               <p className="text-[9px] font-black opacity-30 uppercase mb-2">Saldo Liberado</p>
               <h4 className="text-xl font-impact italic text-[#a3e635]">R$ {saldoLiberado.toFixed(2)}</h4>
             </div>
-            <div className="glass-card p-6 rounded-[2rem] text-center border border-white/5">
-              <p className="text-[9px] font-black opacity-30 uppercase mb-2">Apostas da Rede</p>
-              <h4 className="text-xl font-impact italic text-white">R$ {totalNetworkSales.toFixed(2)}</h4>
-            </div>
-            <div className="glass-card p-6 rounded-[2rem] text-center border border-[#a3e635]/20">
-              <p className="text-[9px] font-black text-[#a3e635] uppercase mb-2">Retenção ({currentUser.commission_rate}%)</p>
-              <h4 className="text-xl font-impact italic text-[#a3e635]">R$ {networkRetention.toFixed(2)}</h4>
-            </div>
             <div className="bg-[#a3e635] p-6 rounded-[2rem] text-center border-2 border-black">
               <p className="text-[9px] font-black text-black/60 uppercase mb-2">Pagar à Diretoria</p>
               <h4 className="text-xl font-impact italic text-black">R$ {toPayAdmin.toFixed(2)}</h4>
             </div>
-          </div>
-
-          <div className="glass-card p-8 rounded-[3rem] border border-white/5">
-             <div className="flex items-center justify-between mb-6">
-                <h3 className="text-xs font-black uppercase opacity-40 tracking-widest">Desempenho da Rede Consolidado</h3>
-                <div className="flex items-center gap-2">
-                   <div className="w-2 h-2 bg-[#a3e635] rounded-full animate-pulse shadow-[0_0_5px_#a3e635]"></div>
-                   <span className="text-[8px] font-black opacity-20 uppercase">Tempo Real</span>
-                </div>
-             </div>
-             <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
-               {myNetwork.length === 0 ? (
-                 <p className="text-center py-10 opacity-20 font-black uppercase text-[10px]">Nenhum membro vinculado à sua rede</p>
-               ) : (
-                 myNetwork.map(u => {
-                   const uTickets = tickets.filter(t => t.parent_id === u.id || t.user_id === u.id);
-                   const uSales = uTickets.reduce((s, t) => s + t.bet_amount, 0);
-                   return (
-                     <div key={u.id} className="flex justify-between items-center p-5 bg-white/5 rounded-2xl border border-white/5 hover:bg-white/10 transition-colors">
-                       <div>
-                         <p className="text-[8px] font-black text-[#a3e635] uppercase tracking-tighter">{u.role}</p>
-                         <p className="text-sm font-impact italic text-white uppercase">{u.name}</p>
-                         <p className="text-[9px] font-black opacity-20 uppercase">Saldo em Mãos: R$ {u.balance.toFixed(2)}</p>
-                       </div>
-                       <div className="text-right">
-                         <p className="text-[9px] font-black opacity-30 uppercase">Volume de Vendas</p>
-                         <p className="font-impact italic text-white text-lg">R$ {uSales.toFixed(2)}</p>
-                       </div>
-                     </div>
-                   );
-                 })
-               )}
-             </div>
           </div>
         </div>
       )}
@@ -219,26 +205,13 @@ const SupervisorDashboard: React.FC<Props> = ({ currentUser, setCurrentUser, use
           <div className="glass-card p-10 rounded-[3rem] border-t-4 border-[#a3e635] space-y-8">
             <div className="text-center">
               <h3 className="text-2xl font-impact italic uppercase text-white mb-2">Perfil de Supervisor</h3>
-              <p className="text-[10px] font-black opacity-20 uppercase tracking-[0.3em]">Configure sua Chave PIX</p>
             </div>
-
             <div className="space-y-4">
               <div className="flex flex-col gap-2">
-                <label className="text-[10px] font-black opacity-40 uppercase tracking-widest px-2">Sua Chave PIX de Recebimento</label>
-                <input 
-                  value={pixInput} 
-                  onChange={e => setPixInput(e.target.value)} 
-                  placeholder="Seu PIX (CPF, E-mail, Celular...)"
-                  className="w-full bg-black/40 border border-white/10 rounded-2xl p-5 text-white outline-none focus:border-[#a3e635] transition-all font-bold"
-                />
+                <label className="text-[10px] font-black opacity-40 uppercase tracking-widest px-2">Sua Chave PIX</label>
+                <input value={pixInput} onChange={e => setPixInput(e.target.value)} placeholder="Seu PIX" className="w-full bg-black/40 border border-white/10 rounded-2xl p-5 text-white outline-none focus:border-[#a3e635] transition-all font-bold" />
               </div>
-              
-              <button 
-                onClick={handleUpdatePix}
-                className="w-full py-5 bg-[#a3e635] text-black font-impact italic rounded-2xl uppercase text-xs tracking-widest shadow-xl hover:scale-105 transition-all"
-              >
-                Salvar Chave PIX
-              </button>
+              <button onClick={handleUpdatePix} className="w-full py-5 bg-[#a3e635] text-black font-impact italic rounded-2xl uppercase text-xs tracking-widest shadow-xl hover:scale-105 transition-all">Salvar Chave PIX</button>
             </div>
           </div>
         </div>

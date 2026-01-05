@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
 import { User, UserRole, Ticket, BalanceRequest } from '../types';
+import { supabase, isSupabaseConfigured } from '../supabaseClient';
 
 interface Props {
   currentUser: User;
@@ -23,12 +24,11 @@ const BookieDashboard: React.FC<Props> = ({ currentUser, setCurrentUser, users, 
   const myClients = users.filter(u => u.parent_id === currentUser.id);
   const pendingForMe = balanceRequests.filter(r => r.status === 'PENDING' && users.find(u => u.id === r.user_id)?.parent_id === currentUser.id);
   
-  // Cálculo Automático de Prestação de Contas
   const myTicketSales = tickets.filter(t => t.parent_id === currentUser.id || t.user_id === currentUser.id);
   const totalSales = myTicketSales.reduce((sum, t) => sum + t.bet_amount, 0);
   const myCommission = totalSales * (currentUser.commission_rate / 100);
   const toPaySupervisor = totalSales - myCommission;
-  const saldoLiberado = currentUser.balance; // Saldo atual que ele tem para trabalhar
+  const saldoLiberado = currentUser.balance;
 
   const handleAddClient = (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,7 +42,7 @@ const BookieDashboard: React.FC<Props> = ({ currentUser, setCurrentUser, users, 
     alert("Atleta cadastrado!");
   };
 
-  const handleApproveBalance = (req: BalanceRequest) => {
+  const handleApproveBalance = async (req: BalanceRequest) => {
     if (currentUser.balance < req.amount) return alert("Seu saldo de Cambista é insuficiente!");
     
     const updatedUsers = users.map(u => {
@@ -52,20 +52,40 @@ const BookieDashboard: React.FC<Props> = ({ currentUser, setCurrentUser, users, 
     });
     setUsers(updatedUsers);
     const updatedMe = updatedUsers.find(u => u.id === currentUser.id);
-    if (updatedMe) setCurrentUser(updatedMe);
+    const updatedTarget = updatedUsers.find(u => u.id === req.user_id);
     
-    setBalanceRequests(balanceRequests.map(r => r.id === req.id ? { ...r, status: 'APPROVED' } : r));
+    if (updatedMe) {
+        setCurrentUser(updatedMe);
+        if (isSupabaseConfigured) await supabase.from('users').update({ balance: updatedMe.balance }).eq('id', updatedMe.id);
+    }
+    if (isSupabaseConfigured && updatedTarget) {
+        await supabase.from('users').update({ balance: updatedTarget.balance }).eq('id', updatedTarget.id);
+    }
+    
+    setBalanceRequests(prev => prev.map(r => r.id === req.id ? { ...r, status: 'APPROVED' } : r));
+    if (isSupabaseConfigured) await supabase.from('balance_requests').update({ status: 'APPROVED' }).eq('id', req.id);
     alert("Saldo aprovado e transferido ao atleta!");
+  };
+
+  const handleRejectBalance = async (req: BalanceRequest) => {
+    if (!confirm("Deseja realmente recusar este pedido de recarga?")) return;
+    
+    setBalanceRequests(prev => prev.map(r => r.id === req.id ? { ...r, status: 'REJECTED' } : r));
+    if (isSupabaseConfigured) {
+      await supabase.from('balance_requests').update({ status: 'REJECTED' }).eq('id', req.id);
+    }
+    alert("Pedido recusado.");
   };
 
   const handleUpdatePix = () => {
     const updatedUser = { ...currentUser, pix_key: pixInput };
     setCurrentUser(updatedUser);
     setUsers(users.map(u => u.id === currentUser.id ? updatedUser : u));
+    if (isSupabaseConfigured) supabase.from('users').update({ pix_key: pixInput }).eq('id', currentUser.id);
     alert("Sua chave PIX foi atualizada!");
   };
 
-  const handleTransfer = (clientId: string, isAdding: boolean = true) => {
+  const handleTransfer = async (clientId: string, isAdding: boolean = true) => {
     const amountStr = (adjustAmounts[clientId] || '0').replace(',', '.');
     const amount = parseFloat(amountStr);
     if (isNaN(amount) || amount <= 0) return alert("Valor inválido!");
@@ -78,7 +98,15 @@ const BookieDashboard: React.FC<Props> = ({ currentUser, setCurrentUser, users, 
     });
     setUsers(updatedUsers);
     const updatedMe = updatedUsers.find(u => u.id === currentUser.id);
-    if (updatedMe) setCurrentUser(updatedMe);
+    const updatedClient = updatedUsers.find(u => u.id === clientId);
+
+    if (updatedMe) {
+        setCurrentUser(updatedMe);
+        if (isSupabaseConfigured) await supabase.from('users').update({ balance: updatedMe.balance }).eq('id', updatedMe.id);
+    }
+    if (isSupabaseConfigured && updatedClient) {
+        await supabase.from('users').update({ balance: updatedClient.balance }).eq('id', updatedClient.id);
+    }
     setAdjustAmounts({ ...adjustAmounts, [clientId]: '' });
   };
 
@@ -108,7 +136,10 @@ const BookieDashboard: React.FC<Props> = ({ currentUser, setCurrentUser, users, 
                         <p className="text-[9px] font-black opacity-40 uppercase">{req.user_name}</p>
                         <p className="font-impact italic text-white text-2xl">R$ {req.amount.toFixed(2)}</p>
                       </div>
-                      <button onClick={() => handleApproveBalance(req)} className="px-6 py-3 bg-[#a3e635] text-black font-impact italic rounded-xl uppercase text-[10px] hover:scale-105 transition-all shadow-lg">Aprovar PIX</button>
+                      <div className="flex gap-2">
+                        <button onClick={() => handleRejectBalance(req)} className="px-4 py-3 bg-red-600/10 text-red-500 border border-red-600/20 font-impact italic rounded-xl uppercase text-[10px] hover:bg-red-600 hover:text-white transition-all">Recusar</button>
+                        <button onClick={() => handleApproveBalance(req)} className="px-6 py-3 bg-[#a3e635] text-black font-impact italic rounded-xl uppercase text-[10px] hover:scale-105 transition-all shadow-lg">Aprovar PIX</button>
+                      </div>
                     </div>
                   ))}
                </div>
@@ -130,10 +161,7 @@ const BookieDashboard: React.FC<Props> = ({ currentUser, setCurrentUser, users, 
               {myClients.map(u => (
                 <div key={u.id} className="match-card p-5 rounded-3xl border border-white/5 flex justify-between items-center group">
                   <div className="flex items-center gap-4">
-                    <button 
-                      onClick={() => onDeleteUser(u.id)}
-                      className="w-10 h-10 bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white rounded-xl transition-all flex items-center justify-center border border-red-500/20"
-                    >
+                    <button onClick={() => onDeleteUser(u.id)} className="w-10 h-10 bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white rounded-xl transition-all flex items-center justify-center border border-red-500/20">
                       <i className="fa-solid fa-trash-can text-xs"></i>
                     </button>
                     <div>
@@ -172,31 +200,28 @@ const BookieDashboard: React.FC<Props> = ({ currentUser, setCurrentUser, users, 
               <h4 className="text-xl font-impact italic text-black">R$ {toPaySupervisor.toFixed(2)}</h4>
             </div>
           </div>
-
           <div className="glass-card p-8 rounded-[3rem] border border-white/5">
              <div className="flex items-center justify-between mb-6">
-               <h3 className="text-xs font-black uppercase opacity-40 tracking-widest">Extrato de Vendas em Tempo Real</h3>
+               <h3 className="text-xs font-black uppercase opacity-40 tracking-widest">Extrato de Vendas</h3>
                <div className="flex items-center gap-2">
-                 <div className="w-2 h-2 bg-[#a3e635] rounded-full animate-pulse shadow-[0_0_5px_#a3e635]"></div>
+                 <div className="w-2 h-2 bg-[#a3e635] rounded-full animate-pulse"></div>
                  <span className="text-[8px] font-black opacity-20 uppercase">Atualizado</span>
                </div>
              </div>
              <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
                {myTicketSales.length === 0 ? (
-                 <p className="text-center py-10 opacity-20 font-black uppercase text-[10px]">Nenhuma venda registrada até o momento</p>
+                 <p className="text-center py-10 opacity-20 font-black uppercase text-[10px]">Nenhuma venda registrada</p>
                ) : (
                  myTicketSales.map(t => (
                    <div key={t.id} className="flex justify-between items-center p-4 bg-white/5 rounded-2xl border border-white/5 group hover:bg-white/10 transition-colors">
                      <div>
                        <div className="flex items-center gap-2">
                          <p className="text-[8px] font-black text-[#a3e635] uppercase">{t.id}</p>
-                         <p className="text-[7px] font-black opacity-20 uppercase">{new Date(t.timestamp).toLocaleTimeString()}</p>
                        </div>
                        <p className="text-xs font-bold text-white uppercase">{t.user_name}</p>
                      </div>
                      <div className="text-right">
                        <p className="font-impact italic text-white">R$ {t.bet_amount.toFixed(2)}</p>
-                       <p className="text-[8px] font-black opacity-20 uppercase">Prêmio R$ {t.potential_prize.toFixed(2)}</p>
                      </div>
                    </div>
                  ))
@@ -213,24 +238,12 @@ const BookieDashboard: React.FC<Props> = ({ currentUser, setCurrentUser, users, 
               <h3 className="text-2xl font-impact italic uppercase text-white mb-2">Meu Perfil de Cambista</h3>
               <p className="text-[10px] font-black opacity-20 uppercase tracking-[0.3em]">Gestão da sua Chave PIX</p>
             </div>
-
             <div className="space-y-4">
               <div className="flex flex-col gap-2">
-                <label className="text-[10px] font-black opacity-40 uppercase tracking-widest px-2">Sua Chave PIX (Para Receber dos Atletas)</label>
-                <input 
-                  value={pixInput} 
-                  onChange={e => setPixInput(e.target.value)} 
-                  placeholder="Seu PIX (CPF, E-mail, Celular...)"
-                  className="w-full bg-black/40 border border-white/10 rounded-2xl p-5 text-white outline-none focus:border-[#a3e635] transition-all font-bold"
-                />
+                <label className="text-[10px] font-black opacity-40 uppercase tracking-widest px-2">Sua Chave PIX</label>
+                <input value={pixInput} onChange={e => setPixInput(e.target.value)} placeholder="Seu PIX" className="w-full bg-black/40 border border-white/10 rounded-2xl p-5 text-white outline-none focus:border-[#a3e635] transition-all font-bold" />
               </div>
-              
-              <button 
-                onClick={handleUpdatePix}
-                className="w-full py-5 bg-[#a3e635] text-black font-impact italic rounded-2xl uppercase text-xs tracking-widest shadow-xl hover:scale-105 active:scale-95 transition-all"
-              >
-                Salvar Chave PIX
-              </button>
+              <button onClick={handleUpdatePix} className="w-full py-5 bg-[#a3e635] text-black font-impact italic rounded-2xl uppercase text-xs tracking-widest shadow-xl hover:scale-105 transition-all">Salvar Chave PIX</button>
             </div>
           </div>
         </div>
