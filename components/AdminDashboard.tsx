@@ -22,7 +22,7 @@ interface Props {
 const AdminDashboard: React.FC<Props> = ({ 
   users, setUsers, onDeleteUser, matches, setMatches, tickets, setTickets, settings, setSettings, balanceRequests, setBalanceRequests, currentUser, onUpdateSingleUser 
 }) => {
-  const [tab, setTab] = useState<'EQUIPE' | 'JOGOS' | 'CONFIG'>('EQUIPE');
+  const [tab, setTab] = useState<'EQUIPE' | 'FINANCEIRO' | 'JOGOS' | 'CONFIG'>('EQUIPE');
   const [newUser, setNewUser] = useState({ name: '', username: '', password: '', role: UserRole.SUPERVISOR });
   const [adjustAmounts, setAdjustAmounts] = useState<Record<string, string>>({});
   
@@ -33,6 +33,19 @@ const AdminDashboard: React.FC<Props> = ({
 
   const myDirectUsers = users.filter(u => u.parent_id === 'admin-1' && u.role !== UserRole.ADMIN);
   const pendingForMe = balanceRequests.filter(r => r.status === 'PENDING' && users.find(u => u.id === r.user_id)?.parent_id === 'admin-1');
+
+  // Cálculos Financeiros Globais
+  const networkTickets = tickets; // Como Admin Master, vê tudo
+  const totalNetworkSales = networkTickets.reduce((sum, t) => sum + t.bet_amount, 0);
+  
+  // Cálculo de comissões estimadas (Supervisores + Cambistas)
+  const totalCommissions = users.reduce((sum, u) => {
+    const userTickets = tickets.filter(t => t.user_id === u.id || t.parent_id === u.id);
+    const sales = userTickets.reduce((s, t) => s + t.bet_amount, 0);
+    return sum + (sales * (u.commission_rate / 100));
+  }, 0);
+
+  const netProfit = totalNetworkSales - totalCommissions;
 
   const handleAddUser = (e: React.FormEvent) => {
     e.preventDefault();
@@ -59,13 +72,11 @@ const AdminDashboard: React.FC<Props> = ({
     const updatedUsers = users.map(u => u.id === req.user_id ? { ...u, balance: u.balance + req.amount } : u);
     const targetUser = updatedUsers.find(u => u.id === req.user_id);
     
-    // Atualiza o usuário
     setUsers(updatedUsers);
     if (isSupabaseConfigured && targetUser) {
       await supabase.from('users').update({ balance: targetUser.balance }).eq('id', targetUser.id);
     }
 
-    // Atualiza o status do pedido
     setBalanceRequests(prev => prev.map(r => r.id === req.id ? { ...r, status: 'APPROVED' } : r));
     if (isSupabaseConfigured) {
       await supabase.from('balance_requests').update({ status: 'APPROVED' }).eq('id', req.id);
@@ -93,16 +104,24 @@ const AdminDashboard: React.FC<Props> = ({
     alert("Dados de acesso Master atualizados com sucesso!");
   };
 
+  const handleResetBalance = async (userId: string) => {
+    if (!confirm("Isso irá ZERAR o saldo do usuário. Use para confirmar recebimento de prestação de contas. Continuar?")) return;
+    const updatedUsers = users.map(u => u.id === userId ? { ...u, balance: 0 } : u);
+    setUsers(updatedUsers);
+    if (isSupabaseConfigured) await supabase.from('users').update({ balance: 0 }).eq('id', userId);
+    alert("Saldo zerado com sucesso!");
+  };
+
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
       <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
-        {['EQUIPE', 'JOGOS', 'CONFIG'].map((t) => (
+        {['EQUIPE', 'FINANCEIRO', 'JOGOS', 'CONFIG'].map((t) => (
           <button 
             key={t}
             onClick={() => setTab(t as any)} 
             className={`px-8 py-4 rounded-2xl font-impact italic text-[11px] uppercase tracking-widest transition-all whitespace-nowrap ${tab === t ? 'bg-[#a3e635] text-black shadow-lg shadow-[#a3e635]/20' : 'bg-white/5 text-white/40'}`}
           >
-            {t === 'EQUIPE' ? 'Rede' : t === 'JOGOS' ? 'Grade' : 'Config'}
+            {t === 'EQUIPE' ? 'Rede' : t === 'FINANCEIRO' ? 'Financeiro' : t === 'JOGOS' ? 'Grade' : 'Config'}
           </button>
         ))}
       </div>
@@ -172,6 +191,81 @@ const AdminDashboard: React.FC<Props> = ({
                 </div>
               ))}
             </div>
+          </div>
+        </div>
+      )}
+
+      {tab === 'FINANCEIRO' && (
+        <div className="space-y-8 animate-in slide-in-from-bottom-6">
+          {/* Dashboard Geral Admin */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="glass-card p-8 rounded-[2.5rem] border-l-4 border-[#a3e635]">
+              <p className="text-[10px] font-black opacity-30 uppercase tracking-widest mb-1">Vendas da Rede</p>
+              <p className="text-4xl font-impact italic text-white">R$ {totalNetworkSales.toFixed(2)}</p>
+            </div>
+            <div className="glass-card p-8 rounded-[2.5rem] border-l-4 border-amber-500">
+              <p className="text-[10px] font-black opacity-30 uppercase tracking-widest mb-1">Comissões da Equipe</p>
+              <p className="text-4xl font-impact italic text-amber-500">R$ {totalCommissions.toFixed(2)}</p>
+            </div>
+            <div className="glass-card p-8 rounded-[2.5rem] border-l-4 border-blue-500">
+              <p className="text-[10px] font-black opacity-30 uppercase tracking-widest mb-1">Lucro Diretoria</p>
+              <p className="text-4xl font-impact italic text-blue-500">R$ {netProfit.toFixed(2)}</p>
+            </div>
+          </div>
+
+          <div className="glass-card p-8 rounded-[3rem] border border-white/5">
+             <div className="flex justify-between items-center mb-8">
+               <h3 className="text-xl font-impact italic uppercase text-white">Relatório por Membro</h3>
+               <div className="flex items-center gap-2">
+                 <div className="w-2 h-2 bg-[#a3e635] rounded-full animate-pulse"></div>
+                 <span className="text-[9px] font-black opacity-20 uppercase">Dados em Tempo Real</span>
+               </div>
+             </div>
+
+             <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
+                {users.filter(u => u.role !== UserRole.ADMIN).map(member => {
+                  const memberTickets = tickets.filter(t => t.user_id === member.id || t.parent_id === member.id);
+                  const memberSales = memberTickets.reduce((s, t) => s + t.bet_amount, 0);
+                  const memberComm = memberSales * (member.commission_rate / 100);
+
+                  return (
+                    <div key={member.id} className="match-card p-6 rounded-[2rem] border border-white/5 grid grid-cols-1 lg:grid-cols-4 items-center gap-6">
+                      <div>
+                        <p className="text-[9px] font-black opacity-30 uppercase mb-1">{member.role}</p>
+                        <p className="font-impact italic text-white text-lg uppercase">{member.name}</p>
+                        <p className="text-[10px] font-black text-[#a3e635] opacity-50">@{member.username}</p>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 gap-4 lg:col-span-2">
+                        <div className="bg-black/20 p-3 rounded-2xl text-center">
+                          <p className="text-[8px] font-black opacity-30 uppercase">Total Vendas</p>
+                          <p className="font-impact italic text-white">R$ {memberSales.toFixed(2)}</p>
+                        </div>
+                        <div className="bg-black/20 p-3 rounded-2xl text-center">
+                          <p className="text-[8px] font-black opacity-30 uppercase">Comissão ({member.commission_rate}%)</p>
+                          <p className="font-impact italic text-amber-500">R$ {memberComm.toFixed(2)}</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between lg:justify-end gap-6">
+                        <div className="text-right">
+                           <p className="text-[8px] font-black opacity-30 uppercase">Saldo devedor</p>
+                           <p className={`font-impact italic text-xl ${member.balance > 0 ? 'text-red-500' : 'text-[#a3e635]'}`}>
+                             R$ {member.balance.toFixed(2)}
+                           </p>
+                        </div>
+                        <button 
+                          onClick={() => handleResetBalance(member.id)}
+                          title="Zerar Saldo (Prestação de Contas)"
+                          className="w-12 h-12 bg-white/5 border border-white/10 rounded-xl flex items-center justify-center text-white/40 hover:text-[#a3e635] hover:border-[#a3e635]/50 transition-all active:scale-90"
+                        >
+                          <i className="fa-solid fa-rotate-left"></i>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+             </div>
           </div>
         </div>
       )}
