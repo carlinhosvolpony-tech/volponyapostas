@@ -48,33 +48,6 @@ const App: React.FC = () => {
   const [balanceRequests, setBalanceRequests] = useState<BalanceRequest[]>([]);
   const [settings, setSettings] = useState<AppSettings>({ pix_key: ADMIN_PIX, is_market_open: true });
   const [view, setView] = useState<'BET' | 'HISTORY' | 'WALLET' | 'DASHBOARD'>('BET');
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
-  const [showInstallPrompt, setShowInstallPrompt] = useState(false);
-
-  useEffect(() => {
-    window.addEventListener('beforeinstallprompt', (e) => {
-      e.preventDefault();
-      setDeferredPrompt(e);
-      // Mostrar prompt após 3 segundos de navegação
-      setTimeout(() => setShowInstallPrompt(true), 3000);
-    });
-
-    // Detectar se já está rodando como app
-    if (window.matchMedia('(display-mode: standalone)').matches) {
-      setShowInstallPrompt(false);
-    }
-  }, []);
-
-  const handleInstallClick = async () => {
-    if (!deferredPrompt) return;
-    deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-    if (outcome === 'accepted') {
-      console.log('User accepted the install prompt');
-    }
-    setDeferredPrompt(null);
-    setShowInstallPrompt(false);
-  };
 
   // --- NÚCLEO DE SINCRONIZAÇÃO EM TEMPO REAL ---
   useEffect(() => {
@@ -268,35 +241,6 @@ const App: React.FC = () => {
         )}
         {view === 'WALLET' && <Wallet user={currentUser} settings={settings} users={users} balanceRequests={balanceRequests} setBalanceRequests={setBalanceRequests} setView={setView} onUpdateUser={handleUpdateSingleUser} onDeleteUser={handleDeleteUser} />}
       </main>
-
-      {/* PWA INSTALL PROMPT */}
-      {showInstallPrompt && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-sm z-[200] pwa-prompt">
-          <div className="glass-card p-6 rounded-[2.5rem] border-2 border-[#a3e635]/30 flex flex-col items-center gap-4 text-center shadow-[0_0_50px_rgba(0,0,0,0.8)]">
-            <div className="w-16 h-16 bg-[#a3e635] rounded-2xl flex items-center justify-center text-slate-950 shadow-lg shadow-[#a3e635]/20">
-              <i className="fa-solid fa-mobile-screen-button text-3xl"></i>
-            </div>
-            <div>
-              <p className="font-impact italic text-white uppercase text-lg tracking-tighter">VOLPONY NO CELULAR</p>
-              <p className="text-[10px] font-black opacity-40 uppercase tracking-widest mt-1">Instale o app para a melhor experiência</p>
-            </div>
-            <div className="flex gap-2 w-full mt-2">
-               <button 
-                  onClick={() => setShowInstallPrompt(false)}
-                  className="flex-1 py-4 bg-white/5 border border-white/10 rounded-2xl text-[10px] font-black uppercase tracking-widest text-white/40 hover:text-white transition-all"
-               >
-                 Agora Não
-               </button>
-               <button 
-                  onClick={handleInstallClick}
-                  className="flex-[2] py-4 bg-[#a3e635] text-black font-impact italic rounded-2xl text-[11px] uppercase tracking-widest shadow-lg shadow-[#a3e635]/10 hover:scale-105 active:scale-95 transition-all"
-               >
-                 Instalar Grátis
-               </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
