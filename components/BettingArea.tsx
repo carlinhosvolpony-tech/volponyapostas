@@ -1,198 +1,211 @@
 
 import React, { useState } from 'react';
-import { Match, Ticket, User } from '../types';
-import { getVolponyPicks } from '../geminiService';
+import { Match, Ticket, User, UserRole, AppSettings } from '../types';
+import { getRodadaPicks } from '../geminiService';
 
 interface Props {
   matches: Match[];
   user: User;
   onBet: (ticket: Ticket) => void;
-  setUser: (u: User) => void;
-  isMarketOpen: boolean;
+  settings: AppSettings;
+  users: User[];
 }
 
-const BettingArea: React.FC<Props> = ({ matches, user, onBet, setUser, isMarketOpen }) => {
-  const [picks, setPicks] = useState<string[]>(new Array(12).fill(''));
-  const [amount, setAmount] = useState<number>(2.00);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
+const BettingArea: React.FC<Props> = ({ matches, user, onBet, settings, users }) => {
+  const [picks, setPicks] = useState<(string | null)[]>(new Array(12).fill(null));
+  const [isAiLoading, setIsAiLoading] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [lastTicket, setLastTicket] = useState<Ticket | null>(null);
 
-  const handlePick = (index: number, option: 'C' | 'E' | 'A') => {
+  const amount = 2.00;
+  const potentialPrize = amount * (settings.prize_multiplier || 500);
+  const isMarketOpen = settings.is_market_open;
+
+  const myBookie = users.find(u => u.id === user.parent_id);
+  const responsibleUser = myBookie || users.find(u => u.role === UserRole.ADMIN);
+
+  const handleSelect = (index: number, choice: string) => {
     if (!isMarketOpen) return;
     const newPicks = [...picks];
-    newPicks[index] = option;
+    newPicks[index] = choice === newPicks[index] ? null : choice;
     setPicks(newPicks);
   };
 
-  const handleVolponyIndica = async () => {
-    if (!isMarketOpen || isAnalyzing) return;
-    setIsAnalyzing(true);
+  const handleAiPicks = async () => {
+    setIsAiLoading(true);
     try {
-      const aiPicks = await getVolponyPicks(matches);
-      setPicks(aiPicks);
-    } catch (err) {
-      alert("Falha ao consultar o especialista Volpony. Tente novamente em instantes.");
+      const results = await getRodadaPicks();
+      setPicks(results);
     } finally {
-      setIsAnalyzing(false);
+      setIsAiLoading(false);
     }
   };
-
-  const handleAmountChange = (val: string) => {
-    const cleanVal = val.replace(',', '.');
-    const num = parseFloat(cleanVal);
-    if (!isNaN(num)) {
-      setAmount(num);
-    } else if (val === '') {
-      setAmount(0);
-    }
-  };
-
-  const isComplete = picks.every(p => p !== '');
 
   const handlePlaceBet = () => {
-    if (!isMarketOpen) {
-      alert("O mercado foi encerrado. Não é possível registrar novos bilhetes.");
-      return;
-    }
-    if (!isComplete) return alert("Complete os 12 palpites!");
-    if (amount < 1.00) return alert("O valor mínimo da aposta é R$ 1,00");
-    if (user.balance < amount) return alert("Saldo insuficiente!");
-
+    if (picks.includes(null)) return alert("Você precisa preencher todos os 12 jogos da rodada!");
+    
     const ticket: Ticket = {
-      id: Math.random().toString(36).substr(2, 9).toUpperCase(),
+      id: Math.random().toString(36).substr(2, 6).toUpperCase(),
       user_id: user.id,
       user_name: user.name,
       bet_amount: amount,
-      potential_prize: amount * 100,
+      potential_prize: potentialPrize,
       status: 'PENDENTE',
       is_settled: false,
       timestamp: Date.now(),
-      parent_id: user.parent_id || 'admin-1',
+      parent_id: responsibleUser?.id,
       matches: matches,
-      picks: picks
+      picks: picks as string[]
     };
 
     onBet(ticket);
-    setUser({ ...user, balance: user.balance - amount });
-    setPicks(new Array(12).fill(''));
-    alert("Bilhete registrado com sucesso!");
+    setLastTicket(ticket);
+    setShowPaymentModal(true);
   };
 
+  const sendToWhatsapp = () => {
+    if (!responsibleUser || !lastTicket) return;
+    const phone = responsibleUser.whatsapp?.replace(/\D/g, '') || '';
+    const message = `🎲 *NOVO BILHETE - RODADA D'GRAU*%0AID: #${lastTicket.id}%0AATLETA: ${user.name}%0AStatus: Aguardando Validação`;
+    window.open(`https://wa.me/${phone}?text=${message}`, '_blank');
+    setShowPaymentModal(false);
+    setPicks(new Array(12).fill(null));
+  };
+
+  const today = new Date();
+  const dateParts = [
+    today.getDate().toString().padStart(2, '0'),
+    (today.getMonth() + 1).toString().padStart(2, '0'),
+    today.getFullYear().toString().slice(-2)
+  ];
+
   return (
-    <div className="max-w-4xl mx-auto space-y-8 pb-32 relative">
-      {!isMarketOpen && (
-        <div className="bg-red-600/20 border-2 border-red-600/50 p-6 rounded-[2rem] text-center animate-pulse">
-          <p className="font-impact italic text-red-500 uppercase tracking-widest flex items-center justify-center gap-3">
-            <i className="fa-solid fa-lock"></i> Mercado Encerrado - Grade em Processamento
+    <div className="max-w-xl mx-auto pb-48 px-4 pt-10">
+      
+      {/* HEADER DINÂMICO DA IMAGEM */}
+      <div className="relative mb-8 pt-10 px-4">
+        {/* Jogador de cima */}
+        <img src="https://www.pngall.com/wp-content/uploads/5/Football-Player-PNG-Free-Download.png" className="absolute -top-10 -left-10 w-48 opacity-40 player-img pointer-events-none" alt="" />
+        
+        {/* Bola central superior */}
+        <div className="absolute top-0 right-0 w-24 h-24 bg-[#a3e635] rounded-full flex items-center justify-center border-4 border-[#020617] shadow-xl z-20">
+           <i className="fa-solid fa-futbol text-4xl text-black"></i>
+        </div>
+
+        <div className="relative z-10">
+          <h1 className="text-6xl font-impact text-white leading-none tracking-tighter uppercase">
+            JOGOS DA <br/><span className="text-[#a3e635]">RODADA!</span>
+          </h1>
+          <p className="text-[10px] font-impact text-white uppercase mt-2 tracking-widest max-w-[280px]">
+            ESCOLHA SEU PALPITE E COMEMORE CADA VITÓRIA
           </p>
         </div>
-      )}
+      </div>
 
-      {/* Header Info Panel */}
-      <div className={`flex flex-col md:flex-row justify-between items-center bg-white/5 p-8 rounded-[3rem] border border-white/5 gap-6 relative overflow-hidden group ${!isMarketOpen ? 'opacity-50 grayscale' : ''}`}>
-        <div className="absolute -top-10 -right-10 opacity-[0.03] pointer-events-none group-hover:rotate-12 transition-transform duration-1000">
-          <i className="fa-solid fa-futbol text-[12rem]"></i>
-        </div>
+      {/* CARTÃO DE APOSTA (Fundo Preto com Borda Branca/Verde) */}
+      <div className="bg-black rounded-[3rem] border-4 border-[#a3e635]/20 p-6 md:p-8 shadow-[0_0_50px_rgba(0,0,0,0.5)] relative overflow-hidden">
         
-        <div className="text-center md:text-left z-10">
-           <p className="text-[10px] font-black opacity-20 uppercase tracking-[0.4em]">Estimativa de Prêmio (12 Acertos)</p>
-           <p className="text-5xl font-impact italic text-[#a3e635]">R$ {(amount * 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+        {/* DIA / DATA */}
+        <div className="flex flex-col items-center gap-4 mb-8">
+          <div className="bg-[#a3e635] px-10 py-2 rounded-xl flex items-center gap-4 font-impact text-black text-2xl">
+            DIA: 
+            <div className="flex gap-2">
+              <span className="bg-black/10 px-2 rounded">{dateParts[0]}</span>/
+              <span className="bg-black/10 px-2 rounded">{dateParts[1]}</span>/
+              <span className="bg-black/10 px-2 rounded">{dateParts[2]}</span>
+            </div>
+          </div>
+          <div className="bg-[#a3e635] px-6 py-1 rounded-lg font-impact text-xs text-black uppercase">
+            CASA / EMPATE / FORA
+          </div>
         </div>
 
-        <div className="flex flex-col sm:flex-row items-center gap-4 z-10 w-full md:w-auto">
-          <button 
-            onClick={handleVolponyIndica}
-            disabled={!isMarketOpen || isAnalyzing}
-            className={`px-8 py-4 rounded-2xl font-impact italic text-[10px] uppercase tracking-widest transition-all flex items-center gap-3 border-2 ${isAnalyzing ? 'bg-white/5 text-white/20 border-white/5 animate-pulse' : 'bg-[#a3e635]/10 text-[#a3e635] border-[#a3e635]/30 hover:bg-[#a3e635] hover:text-black shadow-lg shadow-[#a3e635]/20 scale-100 hover:scale-105 active:scale-95'}`}
-          >
-            <i className={`fa-solid ${isAnalyzing ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'}`}></i>
-            {isAnalyzing ? 'Analisando...' : 'Volpony Indica'}
-          </button>
-
-          <div className="flex items-center gap-2 bg-black/40 p-2 rounded-3xl border border-white/5">
-             <button 
-                onClick={() => setAmount(Math.max(1, amount - 0.5))} 
-                disabled={!isMarketOpen} 
-                className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center hover:bg-white/10 text-white/40 disabled:opacity-20"
-              >
-                -
-              </button>
-             <div className="px-2 text-center flex flex-col items-center">
-               <p className="text-[7px] font-black opacity-20 uppercase">Valor do Bilhete</p>
-               <div className="flex items-center gap-1">
-                 <span className="text-[10px] font-impact text-white/40">R$</span>
-                 <input 
-                    type="text" 
-                    value={amount === 0 ? '' : amount.toString().replace('.', ',')}
-                    onChange={(e) => handleAmountChange(e.target.value)}
-                    disabled={!isMarketOpen}
-                    className="w-20 bg-transparent border-none outline-none font-impact italic text-lg text-white text-center focus:text-[#a3e635] transition-colors"
-                    placeholder="1,00"
-                 />
+        {/* LISTA DE 12 JOGOS COM CÁPSULAS E PARÊNTESES */}
+        <div className="space-y-3">
+          {matches.slice(0, 12).map((match, idx) => (
+            <div key={idx} className="flex items-center gap-3">
+               {/* Nome do Jogo em Cápsula */}
+               <div className="flex-1 capsule-green h-11 flex items-center justify-center text-[11px] px-6 shadow-md truncate">
+                  {match.home} <span className="mx-3 opacity-50">X</span> {match.away}
                </div>
-             </div>
-             <button 
-                onClick={() => setAmount(amount + 0.5)} 
-                disabled={!isMarketOpen} 
-                className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center hover:bg-white/10 text-white/40 disabled:opacity-20"
-              >
-                +
-              </button>
-          </div>
+               
+               {/* Seleção ( ) ( ) ( ) */}
+               <div className="flex items-center gap-1">
+                 {["CASA", "EMPATE", "FORA"].map((opt) => {
+                   const isSelected = picks[idx] === opt;
+                   const label = opt === "CASA" ? "1" : opt === "EMPATE" ? "X" : "2";
+                   return (
+                     <button
+                       key={opt}
+                       onClick={() => handleSelect(idx, opt)}
+                       className={`parenthesis-btn px-1 flex items-center gap-0.5 hover:scale-110 transition-transform ${isSelected ? 'active' : ''}`}
+                     >
+                       <span>(</span>
+                       <span className={`w-4 text-center text-sm ${isSelected ? 'text-white' : 'opacity-0'}`}>{label}</span>
+                       <span>)</span>
+                     </button>
+                   );
+                 })}
+               </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Botão IA (Sugestão Rápida) */}
+        <div className="mt-8">
+          <button 
+            onClick={handleAiPicks}
+            disabled={isAiLoading || !isMarketOpen}
+            className="w-full py-4 border-2 border-dashed border-[#a3e635]/20 text-[#a3e635]/60 rounded-2xl font-impact text-[10px] uppercase tracking-widest hover:border-[#a3e635] hover:text-[#a3e635] transition-all"
+          >
+            {isAiLoading ? <i className="fa-solid fa-spinner fa-spin mr-2"></i> : <i className="fa-solid fa-wand-sparkles mr-2"></i>}
+            GERAR PALPITE ALEATÓRIO
+          </button>
         </div>
       </div>
 
-      {/* Grid de Jogos */}
-      <div className={`grid grid-cols-1 md:grid-cols-2 gap-4 ${!isMarketOpen ? 'pointer-events-none' : ''}`}>
-        {matches.map((m, i) => (
-          <div key={m.id} className={`match-card p-6 rounded-[2rem] border border-white/5 space-y-4 ${!isMarketOpen ? 'opacity-30' : ''}`}>
-            <div className="flex justify-between items-center">
-              <span className="text-[10px] font-black text-[#a3e635] uppercase tracking-wider">{m.league}</span>
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-black opacity-20 uppercase">{m.time}</span>
-                <span className="w-5 h-5 rounded bg-white/5 flex items-center justify-center text-[9px] font-impact italic text-white/20">#{i + 1}</span>
-              </div>
+      {/* Rodapé Fixo de Envio */}
+      <div className="fixed bottom-0 left-0 w-full p-6 bg-gradient-to-t from-[#020617] via-[#020617] to-transparent z-[80]">
+        <div className="max-w-md mx-auto bg-slate-900/90 backdrop-blur-xl p-6 rounded-[2.5rem] border border-white/10 shadow-2xl">
+          <div className="flex justify-between items-center mb-6 px-4">
+            <div className="text-left">
+              <span className="text-[9px] font-black opacity-30 uppercase block">Total (12 Jogos)</span>
+              <span className="font-impact text-2xl text-[#a3e635]">R$ 2,00</span>
             </div>
-            
-            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 py-2">
-               <p className="text-xs font-black uppercase text-right truncate text-white">{m.home}</p>
-               <span className="text-[10px] font-black opacity-10 italic">X</span>
-               <p className="text-xs font-black uppercase text-left truncate text-white">{m.away}</p>
-            </div>
-
-            <div className="grid grid-cols-3 gap-2">
-               {[
-                 { label: 'CASA', val: 'C' },
-                 { label: 'EMPATE', val: 'E' },
-                 { label: 'FORA', val: 'A' }
-               ].map(opt => (
-                 <button 
-                  key={opt.val}
-                  disabled={!isMarketOpen}
-                  onClick={() => handlePick(i, opt.val as any)}
-                  className={`py-3.5 rounded-xl text-[10px] font-impact italic uppercase transition-all border-2 ${picks[i] === opt.val ? 'bg-[#a3e635] text-black border-[#a3e635] shadow-lg shadow-[#a3e635]/20 scale-[1.02]' : 'bg-white/5 text-white/40 border-transparent hover:border-white/10 disabled:hover:border-transparent'}`}
-                 >
-                   {opt.label}
-                 </button>
-               ))}
+            <div className="text-right">
+              <span className="text-[9px] font-black opacity-30 uppercase block">Prêmio Estimado</span>
+              <span className="font-impact text-2xl text-yellow-400">R$ {potentialPrize.toFixed(2)}</span>
             </div>
           </div>
-        ))}
+          <button 
+            onClick={handlePlaceBet}
+            disabled={picks.includes(null) || !isMarketOpen}
+            className="w-full py-5 rounded-2xl font-impact text-xl bg-[#a3e635] text-black shadow-lg disabled:opacity-30 disabled:grayscale transition-all active:scale-95"
+          >
+            CONFIRMAR BILHETE
+          </button>
+        </div>
       </div>
 
-      <button 
-        disabled={!isComplete || !isMarketOpen || amount < 1.00}
-        onClick={handlePlaceBet}
-        className={`fixed bottom-10 left-1/2 -translate-x-1/2 w-[90%] max-w-lg py-6 rounded-3xl font-impact italic text-xl uppercase tracking-widest shadow-2xl transition-all z-50 ${isMarketOpen ? (isComplete && amount >= 1.00 ? 'bg-[#a3e635] text-black hover:scale-105 active:scale-95 cursor-pointer ring-4 ring-black/50' : 'bg-slate-800 text-white/20 cursor-not-allowed') : 'bg-red-600 text-white cursor-not-allowed'}`}
-      >
-        {!isMarketOpen ? (
-          <span className="flex items-center justify-center gap-3">
-            <i className="fa-solid fa-lock"></i> MERCADO FECHADO
-          </span>
-        ) : (
-          amount < 1.00 ? 'VALOR MÍNIMO R$ 1,00' :
-          isComplete ? 'CONFIRMAR BILHETE' : `FALTAM ${picks.filter(p => p === '').length} PALPITES`
-        )}
-      </button>
+      {/* Jogador de baixo */}
+      <img src="https://www.pngall.com/wp-content/uploads/5/Football-Player-PNG-Free-Download.png" className="fixed bottom-10 -right-20 w-80 opacity-20 player-img pointer-events-none z-0 rotate-12" alt="" />
+
+      {/* Modal Pix (Simplificado) */}
+      {showPaymentModal && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-black/95 backdrop-blur-md">
+          <div className="glass-card w-full max-w-sm p-10 rounded-[3rem] text-center border-t-4 border-[#a3e635]">
+            <h3 className="font-impact text-2xl text-white uppercase mb-8 italic">Validar Bilhete</h3>
+            <div className="bg-white/5 p-6 rounded-2xl mb-8">
+              <p className="text-[8px] font-black opacity-30 uppercase mb-2">Chave PIX do Responsável</p>
+              <p className="font-mono text-xs text-[#a3e635] break-all font-bold">{responsibleUser?.pix_key || settings.pix_key}</p>
+            </div>
+            <button onClick={sendToWhatsapp} className="w-full py-6 bg-[#25D366] text-white font-impact rounded-2xl uppercase flex items-center justify-center gap-4 shadow-xl">
+              <i className="fa-brands fa-whatsapp text-2xl"></i> ENVIAR COMPROVANTE
+            </button>
+            <button onClick={() => setShowPaymentModal(false)} className="mt-6 text-[10px] font-black opacity-30 uppercase">Cancelar</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

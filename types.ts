@@ -14,8 +14,9 @@ export interface User {
   role: UserRole;
   balance: number;
   parent_id?: string | null;
-  commission_rate: number; // Porcentagem de comissão (ex: 10 para 10%)
+  commission_rate: number;
   pix_key?: string;
+  whatsapp?: string;
   created_at?: number;
 }
 
@@ -23,8 +24,7 @@ export interface Match {
   id: string;
   home: string;
   away: string;
-  league: string;
-  time: string;
+  label: string;
 }
 
 export interface Ticket {
@@ -34,23 +34,28 @@ export interface Ticket {
   bet_amount: number;
   potential_prize: number;
   status: 'PENDENTE' | 'VALIDADO' | 'GANHOU' | 'PERDEU';
-  is_settled: boolean; // Se já foi prestado contas com o superior
+  is_settled: boolean;
   timestamp: number;
-  parent_id?: string; // ID do Cambista/Supervisor que validou
+  parent_id?: string;
   matches: Match[];
-  picks: string[];
+  picks: string[]; // Array de 12 strings: "CASA", "EMPATE" ou "FORA"
 }
 
 export interface AppSettings {
   pix_key: string;
   is_market_open: boolean;
+  prize_multiplier: number;
 }
 
-export interface BalanceRequest {
+export interface Settlement {
   id: string;
-  user_id: string;
-  user_name: string;
-  amount: number;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED';
-  created_at: number;
+  from_id: string;
+  to_id: string;
+  from_name: string;
+  total_volume: number;
+  commission_amount: number;
+  net_amount: number;
+  status: 'PENDENTE' | 'PAGO' | 'CONCLUIDO';
+  timestamp: number;
+  ticket_ids: string[];
 }

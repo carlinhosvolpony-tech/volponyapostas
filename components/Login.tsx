@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { User, UserRole } from '../types';
 
 interface LoginProps {
@@ -37,7 +37,6 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, setUsers }) => {
         setIsReg(false);
         alert("Cadastro realizado! Bem-vindo à arena.");
       } else {
-        // Busca o usuário na lista sincronizada (Realtime já garante que o Admin esteja aqui)
         const user = users.find(u => 
           u.username.toLowerCase() === form.username.toLowerCase() && 
           u.password === form.password
@@ -57,7 +56,6 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, setUsers }) => {
 
   return (
     <div className="h-screen flex items-center justify-center p-6 overflow-hidden">
-      {/* Background Animated Elements */}
       <div className="absolute top-0 left-0 w-full h-full pointer-events-none overflow-hidden">
         <div className="absolute -top-20 -left-20 w-96 h-96 bg-[#a3e635]/10 rounded-full blur-[120px] animate-pulse"></div>
         <div className="absolute bottom-0 right-0 w-80 h-80 bg-blue-600/10 rounded-full blur-[100px]"></div>
@@ -69,7 +67,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, users, setUsers }) => {
         </div>
         
         <h1 className="text-4xl md:text-5xl font-impact italic uppercase text-white mb-2 tracking-tighter">
-          D'Grau <span className="text-[#a3e635]">Apostas</span>
+          Rodada <span className="text-[#a3e635]">D'grau</span>
         </h1>
         <p className="text-[9px] font-black opacity-30 uppercase tracking-[0.4em] mb-10">
           {isReg ? 'Recrutamento de Atletas' : 'Portal de Entrada'}

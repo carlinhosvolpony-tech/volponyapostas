@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>D'GRAU APOSTAS | Elite Betting Arena</title>
+    <title>RODADA D'GRAU | Elite Betting Arena</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
@@ -13,8 +13,6 @@
         :root {
             --neon-lime: #a3e635;
             --deep-slate: #020617;
-            --winner-gold: #fbbf24;
-            --glass-bg: rgba(15, 23, 42, 0.7);
         }
         
         body { 
@@ -24,84 +22,45 @@
             margin: 0;
             overflow-x: hidden;
             background-image: 
-                radial-gradient(circle at 50% -20%, #064e3b 0%, transparent 50%),
-                radial-gradient(circle at 0% 100%, #020617 0%, transparent 40%);
+                linear-gradient(to bottom, rgba(2, 6, 23, 0.8), rgba(2, 6, 23, 0.95)),
+                url('https://images.unsplash.com/photo-1508098682722-e99c43a406b2?auto=format&fit=crop&q=80&w=1000');
+            background-size: cover;
             background-attachment: fixed;
-            transition: all 1s ease;
-            -webkit-tap-highlight-color: transparent;
-        }
-
-        body.is-winner {
-            background-image: 
-                radial-gradient(circle at 50% -20%, #78350f 0%, transparent 50%),
-                radial-gradient(circle at 0% 100%, #1e1b4b 0%, transparent 40%);
         }
         
-        .font-impact { font-family: 'Archivo Black', sans-serif; }
+        .font-impact { font-family: 'Archivo Black', sans-serif; font-style: italic; }
 
-        .glass-card {
-            background: var(--glass-bg);
-            backdrop-filter: blur(16px);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        .capsule-green {
+            background-color: var(--neon-lime);
+            color: black;
+            border-radius: 9999px;
+            font-family: 'Archivo Black', sans-serif;
+            font-style: italic;
         }
 
-        .match-card {
-            background: rgba(255, 255, 255, 0.02);
-            border: 1px solid rgba(255, 255, 255, 0.05);
-            transition: all 0.4s cubic-bezier(0.23, 1, 0.32, 1);
-        }
-
-        .match-card:hover {
-            background: rgba(255, 255, 255, 0.05);
-            border-color: var(--neon-lime);
-            transform: translateY(-4px);
-        }
-
-        .bet-option {
-            border: 1px solid rgba(255, 255, 255, 0.05);
+        .parenthesis-btn {
+            font-family: 'Archivo Black', sans-serif;
+            color: var(--neon-lime);
+            font-size: 1.2rem;
             transition: all 0.2s ease;
         }
 
-        .bet-option.selected {
-            background: var(--neon-lime);
-            color: black;
-            font-weight: 900;
-            box-shadow: 0 0 20px rgba(163, 230, 53, 0.3);
+        .parenthesis-btn.active {
+            color: white;
+            text-shadow: 0 0 10px var(--neon-lime);
         }
 
-        .btn-primary {
-            background: var(--neon-lime);
-            color: black;
-            font-family: 'Archivo Black', sans-serif;
-            text-transform: uppercase;
-            transition: all 0.3s ease;
+        .glass-card {
+            background: rgba(0, 0, 0, 0.9);
+            backdrop-filter: blur(10px);
+            border: 2px solid rgba(255, 255, 255, 0.1);
         }
 
-        .btn-primary:hover:not(:disabled) {
-            transform: scale(1.02);
-            box-shadow: 0 0 25px rgba(163, 230, 53, 0.4);
+        /* Animação para os jogadores */
+        .player-img {
+            filter: grayscale(100%) contrast(150%) brightness(80%);
+            mix-blend-mode: lighten;
         }
-
-        .live-dot {
-            width: 8px;
-            height: 8px;
-            background-color: var(--neon-lime);
-            border-radius: 50%;
-            display: inline-block;
-            box-shadow: 0 0 10px var(--neon-lime);
-            animation: pulse 2s infinite;
-        }
-
-        @keyframes pulse {
-            0% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.4; transform: scale(1.2); }
-            100% { opacity: 1; transform: scale(1); }
-        }
-
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: var(--neon-lime); border-radius: 10px; }
     </style>
     <script type="importmap">
     {
@@ -118,7 +77,7 @@
     </script>
 <link rel="stylesheet" href="/index.css">
 </head>
-<body class="custom-scrollbar">
+<body>
     <div id="root"></div>
     <script type="module" src="index.tsx"></script>
 <script type="module" src="/index.tsx"></script>
